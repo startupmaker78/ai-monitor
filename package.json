@@ -7,10 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:connections": "tsx scripts/test-connections.ts"
+    "test:connections": "tsx scripts/test-connections.ts",
+    "prisma": "dotenv -e .env.local -- prisma"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1034.0",
+    "@prisma/client": "^7.8.0",
     "@radix-ui/react-slot": "^1.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -28,9 +30,11 @@
     "@types/pg": "^8.20.0",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "postcss": "^8",
+    "prisma": "^7.8.0",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.21.0",
     "typescript": "^5"

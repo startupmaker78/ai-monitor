@@ -227,3 +227,50 @@
 **Причина:** Этап 0 (настройка инфры — самая простая часть проекта) занял заметно больше времени чем ожидалось. Дальше будет сложнее: Prisma + схема БД, NextAuth, rrweb-трекер с аплоадом сессий в S3, AI-анализ через Claude API, биллинг через YooKassa, email через Resend — каждый пункт это 1-3 дня минимум.
 
 **Последствия:** не обещаем клиентам/партнёрам MVP раньше чем через 5 недель. Не выгораем, работаем устойчиво.
+
+---
+
+## 2026-04-22: Workflow миграций Prisma для Yandex Managed PostgreSQL
+
+**Проблема:** `npm run prisma migrate dev` не работает с Yandex Managed PostgreSQL — у пользователя webmonitor нет прав на CREATE DATABASE для shadow database (стандартный механизм Prisma для сравнения схемы в dev-окружении).
+
+**Решение — правильный workflow миграций:**
+
+1. Изменить prisma/schema.prisma (добавить модель, поле, enum и т.д.)
+
+2. Сгенерировать SQL миграцию БЕЗ shadow DB:
+   ```
+   npm run prisma migrate diff \
+     --from-migrations prisma/migrations \
+     --to-schema-datamodel prisma/schema.prisma \
+     --script > /tmp/migration.sql
+   ```
+   Проверить содержимое /tmp/migration.sql глазами — не должно быть DROP TABLE без явного намерения, подозрительных ALTER и т.п.
+
+3. Создать папку миграции вручную:
+   ```
+   mkdir -p prisma/migrations/<timestamp>_<descriptive_name>
+   mv /tmp/migration.sql prisma/migrations/<timestamp>_<name>/migration.sql
+   ```
+   Где `<timestamp>` — формат YYYYMMDDHHMMSS, `<descriptive_name>` — snake_case, например `add_site_model` или `user_email_verified_field`.
+
+4. Применить миграцию:
+   ```
+   npm run prisma migrate deploy
+   ```
+
+5. Обновить Prisma Client:
+   ```
+   npm run prisma generate
+   ```
+
+6. Проверить что всё в синхроне:
+   ```
+   npm run prisma migrate status
+   ```
+   → должно вернуть "Database schema is up to date!"
+
+**Альтернатива на будущее (когда появится локальная БД):** настроить shadow database через Docker Postgres и указать shadowDatabaseUrl в prisma.config.ts — тогда `migrate dev` заработает как обычно.
+
+**Применённые миграции:**
+- `20260422000000_init_user_model` — первая модель User с enum UserRole (ADMIN, CONTRACTOR, OWNER)

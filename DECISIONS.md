@@ -35,7 +35,7 @@
 - Один репозиторий, один деплой на Vercel — меньше сложности для MVP
 - Лёша не программист, один стек проще поддерживать
 - App Router + Server Actions упрощают работу с данными
-- Vercel нативно поддерживает Next.js (Cron Jobs, Background Functions)
+- ~~Vercel нативно поддерживает Next.js (Cron Jobs, Background Functions)~~ _[УСТАРЕЛО 2026-04-22: деплой решён на Yandex Cloud, см. запись "Деплой — Yandex Cloud, не Vercel"]_
 
 **Альтернативы, которые отклонили**:
 - Отдельный React-фронт + Express/Fastify бэк — лишняя сложность для MVP
@@ -80,7 +80,7 @@
 - Хорошая документация, широкое сообщество в РФ
 
 **Архитектура данных (продакшн)**:
-- Compute: Next.js на Vercel (без хранения PD, допустимо в EU)
+- ~~Compute: Next.js на Vercel (без хранения PD, допустимо в EU)~~ _[УСТАРЕЛО 2026-04-22: деплой решён на Yandex Cloud, см. запись "Деплой — Yandex Cloud, не Vercel"]_
 - БД: Yandex Cloud Managed PostgreSQL (регион ru-central1, Москва)
 - Файлы: Yandex Object Storage (регион ru-central1)
 
@@ -99,7 +99,7 @@
 - Экономия на Neon/R2 не покрывает стоимость простоя при миграции
 - Yandex Cloud имеет бесплатный грант для новых аккаунтов — первые месяцы разработки бесплатны
 
-**Vercel + Yandex Cloud совместимость**: Vercel подключается к внешним PostgreSQL через стандартный TCP (SSL). Это стандартная практика — аналогично Vercel + AWS RDS. Yandex Object Storage имеет S3-совместимый API, подключается через `@aws-sdk/client-s3` с кастомным endpoint `storage.yandexcloud.net`.
+~~**Vercel + Yandex Cloud совместимость**: Vercel подключается к внешним PostgreSQL через стандартный TCP (SSL). Это стандартная практика — аналогично Vercel + AWS RDS. Yandex Object Storage имеет S3-совместимый API, подключается через `@aws-sdk/client-s3` с кастомным endpoint `storage.yandexcloud.net`.~~ _[УСТАРЕЛО 2026-04-22: деплой решён на Yandex Cloud, см. запись "Деплой — Yandex Cloud, не Vercel"]_
 
 **Статус**: ЗАКРЫТ, переходим на Yandex Cloud с первого дня.
 

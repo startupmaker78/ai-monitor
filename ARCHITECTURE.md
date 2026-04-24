@@ -97,41 +97,61 @@ webmonitor/  (папка проекта, англ. транслитерация 
 
 ```
 User (пользователи)
-  id, email, passwordHash, role (CONTRACTOR | OWNER), createdAt
+  id, email, passwordHash, name, role (ADMIN | CONTRACTOR | OWNER)
+  createdAt, updatedAt
+  # role по умолчанию OWNER. Смена на CONTRACTOR — после APPROVED
+  # PartnerApplication, смена на ADMIN — вручную.
 
 ContractorProfile
   id, userId, balance, totalEarned
+  # Создаётся ТОЛЬКО при APPROVED PartnerApplication.
 
-OwnerProfile  
-  id, userId, contractorId (FK), siteUrl, tildaSiteId
+OwnerProfile
+  id, userId, contractorId (FK, nullable), siteUrl, tildaSiteId
   metrikaCounterId, metrikaToken
+  # contractorId NULL для самостоятельно зарегистрированных владельцев.
+  # Задним числом проставить нельзя (защита от фрода).
 
 Subscription
-  id, ownerId, plan (BASIC | PRO | BUSINESS | ENTERPRISE)
+  id, ownerId, plan (BASIC | PRO | BUSINESS)
   billingPeriod (MONTHLY | ANNUAL)
   status (ACTIVE | CANCELLED | TRIAL)
   currentPeriodStart, currentPeriodEnd
   analysesUsedThisMonth, yookassaSubscriptionId
+  customLimits (JSON, nullable)
+  # customLimits — для Enterprise-клиентов (индивидуальная цена,
+  # обрабатывается админом вручную). Поле не null означает
+  # "кастомные лимиты переопределяют plan".
 
 Site
   id, ownerId, domain, trackingToken (уникальный токен для скрипта)
+  isDemo (Boolean, default false)
+  # isDemo=true для демо-стендов, которые создаются автоматически
+  # при регистрации подрядчиков и self-service владельцев.
+  # В демо подгружаются фиксированные seed-данные, реальный
+  # трекинг не собирается.
 
 Session (сессии посетителей, хранятся 30 дней)
   id, siteId, sessionToken, ipHash, userAgent
   startedAt, endedAt, eventsCount
   storageKey (ключ в Object Storage для rrweb-данных)
+  # Метаданные в PostgreSQL удаляются cron-задачей через 30 дней,
+  # параллельно с lifecycle policy Object Storage на префикс sessions/.
 
 MetricsSnapshot (ежедневный снапшот всех метрик сайта)
   id, siteId, date (unique per site per day)
   visits, uniqueVisitors, conversions, bounceRate, avgSessionDuration
   goals (JSON)                     # цели Метрики: {name, count, conversionRate}
   source (METRIKA | MANUAL)        # откуда данные
+  # Хранится БЕЗ удаления (для долгосрочной аналитики "год назад").
 
 Analysis (результаты AI-анализа)
   id, siteId, requestedBy, status (PENDING | RUNNING | DONE | FAILED)
   prompt, createdAt, completedAt
   sessionsAnalyzed, tokensUsed
   recommendationsCount             # сколько рекомендаций вернул AI
+  # Хранится без удаления. createdAt используется для проверки
+  # 7-дневного кулдауна.
 
 Recommendation (отдельные рекомендации из анализа)
   id, analysisId, priority (CRITICAL | IMPORTANT | GOOD)
@@ -143,15 +163,30 @@ Recommendation (отдельные рекомендации из анализа)
   appliedAt (datetime, nullable)   # когда перевели в DONE
   metricsBefore (JSON, nullable)   # снапшот MetricsSnapshot на момент IN_PROGRESS
   metricsAfter (JSON, nullable)    # снапшот MetricsSnapshot через 7 дней после DONE
+  # Хранится без удаления. metricsBefore снимается при переходе в
+  # IN_PROGRESS, metricsAfter — через 7 дней после DONE.
 
 InviteToken
   id, contractorId, email, token, expiresAt, usedAt
-  companyName, phone, metrikaCounterId  # данные из формы подрядчика
+  # Раньше хранил companyName/phone/metrikaCounterId — эти данные
+  # владелец теперь вводит сам при регистрации. Токен — только
+  # для привязки к подрядчику.
 
 PaymentEvent (история платежей)
   id, subscriptionId, amount, commissionAmount
   yookassaPaymentId, status, createdAt
   billingPeriod (MONTHLY | ANNUAL)
+
+PartnerApplication (заявка на партнёрство)
+  id, userId (FK User), companyName, experience
+  portfolioUrl (nullable), telegram (nullable), phone (nullable)
+  status (PENDING | APPROVED | REJECTED)
+  rejectionReason (nullable)
+  reviewedBy (FK User, nullable, role=ADMIN), reviewedAt (nullable)
+  createdAt, updatedAt
+  # Заявка пользователя OWNER на получение роли CONTRACTOR.
+  # При APPROVED — админ меняет User.role на CONTRACTOR и
+  # создаёт ContractorProfile.
 ```
 
 ---

@@ -45,6 +45,10 @@ model ContractorProfile {
   clients OwnerProfile[]
 }
 
+// TODO(2026-04-27): дублирование с Site — siteUrl/tildaSiteId/metrikaCounterId/metrikaToken
+// пересекаются с тем, что должно жить в Site. Разрулить на этапе 0.c.5
+// (см. DECISIONS.md «2026-04-27: Открытый вопрос — дублирование metrika-полей
+// между OwnerProfile и Site»).
 model OwnerProfile {
   id               String             @id @default(cuid())
   userId           String             @unique
@@ -57,6 +61,39 @@ model OwnerProfile {
   metrikaToken     String?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
+
+  sites Site[]
+}
+
+model Site {
+  id            String   @id @default(cuid())
+  ownerId       String
+  owner         OwnerProfile @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  domain        String
+  trackingToken String       @unique
+  isDemo        Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  sessions Session[]
+
+  @@index([ownerId])
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  siteId       String
+  site         Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  sessionToken String    @unique
+  ipHash       String    @db.Char(64)
+  userAgent    String    @db.Text
+  startedAt    DateTime
+  endedAt      DateTime?
+  eventsCount  Int       @default(0)
+  storageKey   String?
+
+  @@index([siteId, startedAt])
+  @@index([startedAt])
 }
 
 model PartnerApplication {

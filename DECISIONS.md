@@ -457,3 +457,35 @@
 
 **Связанные изменения:**
 - ARCHITECTURE.md (коммит bd2c6da): схема модели AnalysisTarget, изменения в Analysis, секция «Условия запуска нового анализа».
+
+---
+
+## 2026-04-27: Workflow миграций — добавлен shadow DB через локальный Docker Postgres
+
+Запись от 2026-04-22 «Workflow миграций Prisma для Yandex Managed PostgreSQL» **частично устарела**. В Prisma 7:
+- Параметр `--to-schema-datamodel` переименован в `--to-schema`.
+- Параметр `--from-migrations` теперь требует `shadowDatabaseUrl` (раньше работал без него).
+
+**Решение:** настроить локальный Docker Postgres как shadow DB на порту 5433. Контейнер запускается через Colima (open-source, нативный M3, без коммерческой лицензии). Подключение указано в `prisma.config.ts` через env-переменную `SHADOW_DATABASE_URL` (хранится в `.env.local`, не коммитится). Инструкция по поднятию shadow DB на новой машине — в `docs/SHADOW_DB_SETUP.md`.
+
+**Корректная команда для генерации миграции:**
+```
+npm run prisma -- migrate diff \
+  --from-migrations prisma/migrations \
+  --to-schema prisma/schema.prisma \
+  --script \
+  --output /tmp/migration.sql
+```
+(`shadowDatabaseUrl` подхватывается из `prisma.config.ts` автоматически.)
+
+**Альтернатива через `--from-config-datasource` (интроспекция живой БД) — отклонена:** ломает воспроизводимость при дрейфе схемы. Если кто-то руками изменит структуру в проде, `migrate diff --from-config-datasource` сравнит схему именно с прод-БД, а не с состоянием после применения всех миграций — на свежей БД `migrate deploy` даст другой результат.
+
+**Зачем Colima, а не Docker Desktop / OrbStack / Postgres.app:**
+- Docker Desktop требует лицензии для коммерческого использования при определённых порогах.
+- OrbStack — коммерческое ПО ($8/мес для бизнеса).
+- Postgres.app — глобальный сервис, отсутствует изоляция; в перспективе проект потребует ещё локальные сервисы (Redis, MinIO для тестов Object Storage), для них всё равно понадобится Docker.
+- Colima — open-source, через brew, нативный ARM64, в комплекте с Docker CLI.
+
+**Применённые миграции на момент решения:**
+- `20260422000000_init_user_model`
+- `20260424222904_add_profiles_and_applications`

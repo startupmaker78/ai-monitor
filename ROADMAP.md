@@ -62,7 +62,7 @@
 - [ ] 0.c.1 Расширить User (уже готов) — при необходимости добавить недостающие поля
 - [ ] 0.c.2 ContractorProfile + OwnerProfile (с nullable contractorId) + PartnerApplication (relations на User)
 - [ ] 0.c.3 Site (с полем isDemo) + Session
-- [ ] 0.c.4 Subscription (BASIC/STANDARD/PROFESSIONAL/CORPORATE, customLimits JSON) + PaymentEvent
+- [x] 0.c.4 Subscription (BASIC/STANDARD/PROFESSIONAL/CORPORATE) + SubscriptionEvent ✅
 - [ ] 0.c.5 MetricsSnapshot + AnalysisTarget + Analysis (с FK targetId на AnalysisTarget) + Recommendation
 - [ ] 0.c.6 InviteToken
 

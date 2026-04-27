@@ -114,24 +114,33 @@ OwnerProfile
   # contractorId NULL для самостоятельно зарегистрированных владельцев.
   # Задним числом проставить нельзя (защита от фрода).
 
-Subscription
-  id, ownerId, plan (BASIC | STANDARD | PROFESSIONAL | CORPORATE)
-  billingPeriod (MONTHLY | ANNUAL)
-  status (ACTIVE | CANCELLED | TRIAL)
+Subscription (одна запись на Owner за всю историю — ownerId UNIQUE)
+  id, ownerId, tier (BASIC | STANDARD | PROFESSIONAL | CORPORATE)
+  status (ACTIVE | PAST_DUE | CANCELED | EXPIRED)
   currentPeriodStart, currentPeriodEnd
-  analysesUsedThisMonth, yookassaSubscriptionId
-  customLimits (JSON, nullable)
-  # customLimits — для Enterprise-клиентов (индивидуальная цена,
-  # обрабатывается админом вручную). Поле не null означает
-  # "кастомные лимиты переопределяют plan".
-  # Кастомные лимиты могут переопределять любые поля плана:
-  # количество целей анализа, анализов в месяц, сессий в месяц,
-  # длительность кулдауна между анализами одной цели.
+  analysesUsedThisPeriod, analysesLimit
+  cancelAtPeriodEnd
+  yookassaCustomerId, yookassaPaymentMethodId
+  createdAt, updatedAt
+  # Период биллинга считается от даты подписки (не календарный месяц).
+  # При апгрейде/даунгрейде/продлении меняем поля той же записи —
+  # история тарифов восстанавливается через SubscriptionEvent.
+  # analysesUsedThisPeriod при смене тарифа НЕ сбрасываем (защита
+  # от абьюза BASIC→STANDARD→BASIC). Сброс только при успешном
+  # продлении (PAYMENT_SUCCEEDED типа RENEWAL).
+  # analysesLimit — кэш лимита текущего тарифа (для гибкости:
+  # промокоды/бонусы прикручиваются изменением этого поля без
+  # смены тарифа).
+  # cancelAtPeriodEnd — флаг "отменить в конце периода без обрыва
+  # доступа сразу".
   # Имена тарифов в UI (русские) маппятся из enum:
   #   BASIC → «Базовый»
   #   STANDARD → «Стандартный»
   #   PROFESSIONAL → «Профессиональный»
   #   CORPORATE → «Корпоративный»
+  # Enterprise тариф и поле customLimits Json? — после MVP
+  # (см. DECISIONS.md «2026-04-27: Модель Subscription и
+  # SubscriptionEvent»).
 
 Site
   id, ownerId, domain, trackingToken (уникальный токен для скрипта)
@@ -206,10 +215,23 @@ InviteToken
   # владелец теперь вводит сам при регистрации. Токен — только
   # для привязки к подрядчику.
 
-PaymentEvent (история платежей)
-  id, subscriptionId, amount, commissionAmount
-  yookassaPaymentId, status, createdAt
-  billingPeriod (MONTHLY | ANNUAL)
+SubscriptionEvent (immutable лог всех событий подписки — финансовых и нет)
+  id, ownerId, subscriptionId (nullable)
+  type (PAYMENT_SUCCEEDED | PAYMENT_FAILED | REFUND | UPGRADE | DOWNGRADE | CANCELED | EXPIRED)
+  tierBefore (nullable), tierAfter (nullable)
+  amount (nullable, Decimal(10,2)), currency (nullable, CHAR(3))
+  yookassaPaymentId (nullable, unique), yookassaPayload (nullable, Json)
+  occurredAt, createdAt
+  # subscriptionId nullable — событие может произойти до создания
+  # подписки (например, провалившийся первый платёж).
+  # amount/currency/yookassaPaymentId nullable — заполнены только
+  # для денежных событий. Для не-денежных (CANCELED через UI без
+  # платежа, EXPIRED по истечении периода) — null.
+  # yookassaPaymentId UNIQUE — защита от двойной обработки
+  # вебхука Юкассы (idempotency).
+  # yookassaPayload — сырой payload вебхука для дебага и аудита.
+  # occurredAt — когда событие произошло у провайдера; createdAt —
+  # когда мы его записали в БД.
 
 PartnerApplication (заявка на партнёрство)
   id, userId (FK User), companyName, experience
@@ -233,9 +255,9 @@ PartnerApplication (заявка на партнёрство)
 | STANDARD      | 6             | 12           | 2 500      | 7 дней                             |
 | PROFESSIONAL  | 12            | 24           | 5 000      | 3 дня                              |
 | CORPORATE     | 24            | 48           | 10 000     | 3 дня                              |
-| Enterprise    | из customLimits | из customLimits | из customLimits | из customLimits |
+| Enterprise   | после MVP            | после MVP           | после MVP           | после MVP                             |
 
-Для Enterprise значения берутся из `Subscription.customLimits` (JSON с ключами `targetsLimit`, `analysesPerMonth`, `sessionsPerMonth`, `cooldownDays`).
+Enterprise тариф на MVP не реализован (см. DECISIONS.md «2026-04-27: Модель Subscription и SubscriptionEvent»). Когда появится первый Enterprise-клиент — добавим миграцией ENTERPRISE в enum SubscriptionTier и поле customLimits Json? в Subscription.
 
 ---
 

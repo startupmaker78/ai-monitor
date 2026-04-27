@@ -508,3 +508,64 @@ npm run prisma -- migrate diff \
 **Применённые миграции на момент решения:**
 - `20260422000000_init_user_model`
 - `20260424222904_add_profiles_and_applications`
+
+---
+
+## 2026-04-27: Модель Subscription и SubscriptionEvent — решения по этапу 0.c.4
+
+**Решение:** реализуем биллинговый слой через две таблицы — `Subscription` (одна запись на Owner) и `SubscriptionEvent` (immutable лог всех изменений подписки, не только финансовых).
+
+### Subscription — одна запись на Owner за всю историю
+
+`Subscription.ownerId` объявлен `@unique`. При апгрейде/даунгрейде/продлении меняем поля той же записи, а не создаём новую. История тарифов восстанавливается через `SubscriptionEvent`.
+
+**Альтернатива которую отклонили:** хранить историю тарифов как series записей в Subscription с полями `validFrom`/`validTo`. Отклонено, потому что:
+- При каждом обращении к "текущей подписке" пришлось бы делать `WHERE validTo IS NULL` — лишняя сложность
+- История уже хранится в SubscriptionEvent — дублирование
+
+### SubscriptionEvent, а не PaymentEvent
+
+Логируем не только денежные события, но и любые изменения подписки: апгрейды, даунгрейды, отмены через UI без платежа, истечение периода. Без этого нельзя восстановить полную историю тарифов клиента — например, "юзер отменил подписку" без платежа не оставит следа.
+
+**Технически:** поля `amount`, `currency`, `yookassaPaymentId` сделаны nullable — для не-денежных событий они пустые. Для бухгалтерской выгрузки фильтр `WHERE amount IS NOT NULL` отдаёт только платежи.
+
+`yookassaPaymentId` — `@unique`, защита от двойной обработки вебхука.
+
+### analysesUsedThisPeriod при смене тарифа НЕ сбрасываем
+
+При апгрейде/даунгрейде счётчик использованных анализов в текущем периоде остаётся как есть — защита от абьюза по схеме BASIC→STANDARD→BASIC (юзер мог бы за месяц получить 4+12+4 = 20 анализов вместо 4 на Базовом).
+
+**Последствие:** если юзер потратил 8 анализов на STANDARD и сделал даунгрейд на BASIC (лимит 4) — анализы заблокированы до начала следующего платёжного периода. Это корректное поведение, не баг. Логика проверки лимита — в коде, не в схеме.
+
+### Период биллинга — от даты подписки
+
+Подписался 14-го числа → следующий период начинается 14-го следующего месяца. Не календарный месяц. Расчёт через `date-fns` (`addMonths`), который корректно обрабатывает кейсы типа "31 января → 28/29 февраля".
+
+Поля `currentPeriodStart` и `currentPeriodEnd` хранятся в Subscription, обновляются при каждом успешном продлении. Сброс `analysesUsedThisPeriod` происходит только при создании события `PAYMENT_SUCCEEDED` типа RENEWAL.
+
+### Триал на MVP не делаем
+
+В enum `SubscriptionStatus` нет TRIAL. Когда понадобится — добавим миграцией.
+
+### Enterprise тариф на MVP не делаем
+
+В enum `SubscriptionTier` нет ENTERPRISE и в `Subscription` нет поля `customLimits Json?`, хотя это упоминается в PRODUCT.md и в ARCHITECTURE.md как стратегическое направление. Причина: Enterprise — ручной B2B-процесс с переговорами, на MVP клиентов не будет. Когда появится первый — добавим миграцией ENTERPRISE в enum и поле customLimits.
+
+**Альтернатива на MVP:** если кому-то нужны нестандартные лимиты — устанавливаем руками через Prisma Studio (например, `analysesLimit = 999` для конкретного Subscription).
+
+### Платёжка — Юкасса
+
+В Subscription поля `yookassaCustomerId` и `yookassaPaymentMethodId` — для рекуррентных платежей. В SubscriptionEvent — `yookassaPaymentId` (уникальный) и `yookassaPayload Json?` (сырой вебхук для дебага).
+
+### Финальные поля Subscription:
+`id, ownerId @unique, tier, status, currentPeriodStart, currentPeriodEnd, analysesUsedThisPeriod, analysesLimit, cancelAtPeriodEnd, yookassaCustomerId, yookassaPaymentMethodId, createdAt, updatedAt`
+
+### Финальные поля SubscriptionEvent:
+`id, ownerId, subscriptionId (nullable), type, tierBefore (nullable), tierAfter (nullable), amount (nullable), currency (nullable, CHAR(3)), yookassaPaymentId (nullable, unique), yookassaPayload (nullable, Json), occurredAt, createdAt`
+
+### Enum'ы
+
+- `SubscriptionStatus`: ACTIVE | PAST_DUE | CANCELED | EXPIRED
+- `SubscriptionEventType`: PAYMENT_SUCCEEDED | PAYMENT_FAILED | REFUND | UPGRADE | DOWNGRADE | CANCELED | EXPIRED
+
+**Применённая миграция:** `20260427195717_add_subscription_and_events`.

@@ -18,6 +18,30 @@ enum PartnerApplicationStatus {
   REJECTED
 }
 
+enum SubscriptionTier {
+  BASIC
+  STANDARD
+  PROFESSIONAL
+  CORPORATE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum SubscriptionEventType {
+  PAYMENT_SUCCEEDED
+  PAYMENT_FAILED
+  REFUND
+  UPGRADE
+  DOWNGRADE
+  CANCELED
+  EXPIRED
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -62,11 +86,13 @@ model OwnerProfile {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
-  sites Site[]
+  sites              Site[]
+  subscription       Subscription?
+  subscriptionEvents SubscriptionEvent[]
 }
 
 model Site {
-  id            String   @id @default(cuid())
+  id            String       @id @default(cuid())
   ownerId       String
   owner         OwnerProfile @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   domain        String
@@ -112,4 +138,46 @@ model PartnerApplication {
   reviewedAt      DateTime?
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
+}
+
+model Subscription {
+  id                      String             @id @default(cuid())
+  ownerId                 String             @unique
+  owner                   OwnerProfile       @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  tier                    SubscriptionTier
+  status                  SubscriptionStatus
+  currentPeriodStart      DateTime
+  currentPeriodEnd        DateTime
+  analysesUsedThisPeriod  Int                @default(0)
+  analysesLimit           Int
+  cancelAtPeriodEnd       Boolean            @default(false)
+  yookassaCustomerId      String?
+  yookassaPaymentMethodId String?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  events SubscriptionEvent[]
+
+  @@index([currentPeriodEnd])
+  @@index([status])
+}
+
+model SubscriptionEvent {
+  id                String                @id @default(cuid())
+  ownerId           String
+  owner             OwnerProfile          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  subscriptionId    String?
+  subscription      Subscription?         @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  type              SubscriptionEventType
+  tierBefore        SubscriptionTier?
+  tierAfter         SubscriptionTier?
+  amount            Decimal?              @db.Decimal(10, 2)
+  currency          String?               @db.Char(3)
+  yookassaPaymentId String?               @unique
+  yookassaPayload   Json?
+  occurredAt        DateTime
+  createdAt         DateTime              @default(now())
+
+  @@index([ownerId, occurredAt])
+  @@index([subscriptionId, occurredAt])
 }

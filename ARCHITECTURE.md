@@ -146,7 +146,8 @@ Subscription (одна запись на Owner за всю историю — ow
   #   STANDARD → «Стандартный»
   #   PROFESSIONAL → «Профессиональный»
   #   CORPORATE → «Корпоративный»
-  # Enterprise тариф и поле customLimits Json? — после MVP
+  # Тариф «Индивидуальный» (значение enum решим при миграции —
+  # CUSTOM или INDIVIDUAL) и поле customLimits Json? — после MVP
   # (см. DECISIONS.md «2026-04-27: Модель Subscription и
   # SubscriptionEvent»).
 
@@ -205,7 +206,7 @@ AnalysisTarget (страницы сайта, по которым можно за
   # Лимит активных целей (archivedAt IS NULL) на сайт зависит от
   # Subscription.tier:
   #   BASIC — 2, STANDARD — 6, PROFESSIONAL — 12, CORPORATE — 24,
-  #   Enterprise — после MVP.
+  #   «Индивидуальный» — после MVP.
 
 Session (сессии посетителей, хранятся 30 дней)
   id, siteId, sessionToken, ipHash, userAgent
@@ -306,19 +307,19 @@ PartnerApplication (заявка на партнёрство)
 
 Лимиты определяются на уровне приложения (не в схеме БД), исходя из `Subscription.tier`:
 
-| Plan         | Целей анализа        | Анализов/мес        | Сессий/мес          |
-|--------------|----------------------|---------------------|---------------------|
-| BASIC        | 2                    | 4                   | 1 000               |
-| STANDARD     | 6                    | 12                  | 2 500               |
-| PROFESSIONAL | 12                   | 24                  | 5 000               |
-| CORPORATE    | 24                   | 48                  | 10 000              |
-| Enterprise   | после MVP            | после MVP           | после MVP           |
+| Plan           | Целей анализа        | Анализов/мес        | Сессий/мес          |
+|----------------|----------------------|---------------------|---------------------|
+| BASIC          | 2                    | 4                   | 1 000               |
+| STANDARD       | 6                    | 12                  | 2 500               |
+| PROFESSIONAL   | 12                   | 24                  | 5 000               |
+| CORPORATE      | 24                   | 48                  | 10 000              |
+| Индивидуальный | после MVP            | после MVP           | после MVP           |
 
 Лимит сессий — это бюджет на распределение между AnalysisTarget. Юзер сам аллоцирует sessionsBudget на каждую цель (минимум 100, максимум — оставшийся свободный баланс). Сумма аллокаций не может превышать sessionsLimit. Анализ цели запускается когда у неё накоплено ≥100 сессий (status = READY).
 
 Кулдаун в днях между анализами одной цели **не используется** — его роль выполняет накопление сессий и переход цели в COMPLETED после анализа (см. DECISIONS.md «2026-04-27: Модель „Бюджеты сессий на цель“»).
 
-Enterprise тариф на MVP не реализован (см. DECISIONS.md «2026-04-27: Модель Subscription и SubscriptionEvent»). Когда появится первый Enterprise-клиент — добавим миграцией ENTERPRISE в enum SubscriptionTier и поле customLimits Json? в Subscription.
+Тариф «Индивидуальный» на MVP не реализован (см. DECISIONS.md «2026-04-27: Модель Subscription и SubscriptionEvent»). Когда появится первый клиент на индивидуальных условиях — добавим миграцией значение в enum SubscriptionTier (рабочее имя — `CUSTOM` или `INDIVIDUAL`, окончательно решим при миграции) и поле customLimits Json? в Subscription.
 
 ---
 

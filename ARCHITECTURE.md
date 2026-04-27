@@ -119,6 +119,7 @@ Subscription (одна запись на Owner за всю историю — ow
   status (ACTIVE | PAST_DUE | CANCELED | EXPIRED)
   currentPeriodStart, currentPeriodEnd
   analysesUsedThisPeriod, analysesLimit
+  sessionsLimit, sessionsAllocated
   cancelAtPeriodEnd
   yookassaCustomerId, yookassaPaymentMethodId
   createdAt, updatedAt
@@ -131,6 +132,13 @@ Subscription (одна запись на Owner за всю историю — ow
   # analysesLimit — кэш лимита текущего тарифа (для гибкости:
   # промокоды/бонусы прикручиваются изменением этого поля без
   # смены тарифа).
+  # sessionsLimit — кэш месячного лимита сессий тарифа (1000/2500/
+  # 5000/10000), распределяется между AnalysisTarget.sessionsBudget.
+  # sessionsAllocated — денормализованная сумма sessionsBudget всех
+  # активных целей (status IN (ACTIVE, READY, ANALYZING)). Цели в
+  # статусе COMPLETED не учитываются (бюджет потрачен), ARCHIVED
+  # тоже не учитываются. Пересчитывается при любом изменении
+  # бюджетов целей. Свободный баланс = sessionsLimit - sessionsAllocated.
   # cancelAtPeriodEnd — флаг "отменить в конце периода без обрыва
   # доступа сразу".
   # Имена тарифов в UI (русские) маппятся из enum:
@@ -152,29 +160,78 @@ Site
 
 AnalysisTarget (страницы сайта, по которым можно запускать AI-анализ)
   id, siteId (FK Site), url, name (string, nullable)
+  sessionsBudget (Int, минимум 100)
+  sessionsCollected (Int, default 0)
+  status (AnalysisTargetStatus: ACTIVE | READY | ANALYZING | COMPLETED | ARCHIVED)
   createdAt, archivedAt (datetime, nullable)
   # url — конкретный URL страницы (например, "https://site.ru/pricing").
   # На MVP только конкретные URL, без паттернов и масок.
   # name — человекочитаемое имя цели для UI ("Страница цен"); опционально.
-  # archivedAt — soft delete вместо физического удаления, потому что
-  # Analysis ссылается на AnalysisTarget через targetId, и история
-  # анализов должна сохраняться. При archivedAt != NULL цель скрыта
-  # из UI выбора при запуске нового анализа, но прошлые анализы
-  # доступны в истории.
+  # sessionsBudget — потолок сессий для этой цели в текущем периоде.
+  # Минимум 100 (нельзя поставить меньше — защита от мусорных
+  # анализов). Сумма sessionsBudget всех активных целей не может
+  # превышать Subscription.sessionsLimit.
+  # sessionsCollected — счётчик собранных сессий по цели в текущем
+  # периоде. Растёт когда сессия посетителя засчитывается этой цели
+  # (см. Session.analysisTargetId). Останавливается когда status
+  # становится ANALYZING или COMPLETED. Сбрасывается в 0 при
+  # обновлении периода Subscription.
+  # status — конечный автомат состояний цели в текущем периоде:
+  #   ACTIVE     — копит сессии, sessionsCollected < sessionsBudget
+  #   READY      — накопила ≥100 сессий, кнопка «Запустить анализ»
+  #                активна (даже если sessionsCollected < sessionsBudget)
+  #   ANALYZING  — анализ запущен, Claude работает, скрипт перестал
+  #                писать сессии в эту цель
+  #   COMPLETED  — анализ завершён, цель в этом периоде больше не
+  #                копит. При обновлении периода → ACTIVE
+  #   ARCHIVED   — юзер удалил цель (дублирует archivedAt != NULL,
+  #                но удобно для фильтрации одним полем)
+  # Переходы:
+  #   ACTIVE → READY автоматически при sessionsCollected ≥ 100
+  #   READY → ANALYZING при нажатии «Запустить анализ»
+  #   ANALYZING → COMPLETED после завершения анализа
+  #   ACTIVE/READY → ARCHIVED при удалении цели юзером (бюджет
+  #     возвращается на свободный баланс полностью)
+  #   COMPLETED → ARCHIVED при удалении (бюджет уже потрачен,
+  #     не возвращается)
+  # Отмена сбора оставшихся: после запуска анализа на 150/300
+  # юзер может нажать «Отменить сбор» — sessionsBudget обрезается
+  # до фактического sessionsCollected на момент анализа, разница
+  # возвращается на свободный баланс.
+  # archivedAt — soft delete; Analysis ссылается на AnalysisTarget
+  # через targetId, история анализов должна сохраняться. При
+  # archivedAt != NULL цель скрыта из UI выбора при запуске нового
+  # анализа, но прошлые анализы доступны в истории.
   # Лимит активных целей (archivedAt IS NULL) на сайт зависит от
-  # Subscription.plan и проверяется при создании новой цели:
+  # Subscription.tier:
   #   BASIC — 2, STANDARD — 6, PROFESSIONAL — 12, CORPORATE — 24,
-  #   Enterprise — из customLimits.
+  #   Enterprise — после MVP.
 
 Session (сессии посетителей, хранятся 30 дней)
   id, siteId, sessionToken, ipHash, userAgent
   startedAt, endedAt, eventsCount
   storageKey (ключ в Object Storage для rrweb-данных)
+  analysisTargetId (FK AnalysisTarget, nullable, ON DELETE SET NULL)
   # Метаданные в PostgreSQL удаляются cron-задачей через 30 дней,
   # параллельно с lifecycle policy Object Storage на префикс sessions/.
   # Сессии собираются со ВСЕХ страниц сайта, не только с тех, что
-  # добавлены как AnalysisTarget. Лимит сессий в месяц по тарифу
-  # считается суммарно по всем страницам сайта.
+  # добавлены как AnalysisTarget. Лимит сессий тарифа (sessionsLimit
+  # в Subscription) распределяется юзером между целями через
+  # AnalysisTarget.sessionsBudget — это бюджет на AI-анализ, не на
+  # запись сессий. Запись сессий не блокируется лимитом (если только
+  # подписка не истекла — тогда /api/tracking/collect возвращает 402).
+  # analysisTargetId — привязка сессии к одной из активных целей
+  # (status IN (ACTIVE, READY)). Проставляется при закрытии сессии
+  # (endedAt). Сервер определяет на какой странице посетитель
+  # провёл больше всего времени за всю сессию (анализирует rrweb-
+  # таймлайн URL); если эта страница совпадает с url одной из
+  # активных целей сайта — analysisTargetId = id этой цели и
+  # AnalysisTarget.sessionsCollected увеличивается на 1. Если ни
+  # одной целевой страницы за сессию не посещено или цель не в
+  # статусе ACTIVE/READY — analysisTargetId = null (сессия в зачёт
+  # не идёт, но сама запись сохраняется).
+  # ON DELETE SET NULL — при физическом удалении цели (которого мы
+  # не делаем — soft delete через archivedAt) ссылка зануляется.
 
 MetricsSnapshot (ежедневный снапшот всех метрик сайта)
   id, siteId, date (unique per site per day)
@@ -247,15 +304,19 @@ PartnerApplication (заявка на партнёрство)
 
 ### Лимиты по тарифам
 
-Лимиты определяются на уровне приложения (не в схеме БД), исходя из `Subscription.plan`:
+Лимиты определяются на уровне приложения (не в схеме БД), исходя из `Subscription.tier`:
 
-| Plan          | Целей анализа | Анализов/мес | Сессий/мес | Кулдаун между анализами одной цели |
-|---------------|---------------|--------------|------------|------------------------------------|
-| BASIC         | 2             | 4            | 1 000      | 7 дней                             |
-| STANDARD      | 6             | 12           | 2 500      | 7 дней                             |
-| PROFESSIONAL  | 12            | 24           | 5 000      | 3 дня                              |
-| CORPORATE     | 24            | 48           | 10 000     | 3 дня                              |
-| Enterprise   | после MVP            | после MVP           | после MVP           | после MVP                             |
+| Plan         | Целей анализа        | Анализов/мес        | Сессий/мес          |
+|--------------|----------------------|---------------------|---------------------|
+| BASIC        | 2                    | 4                   | 1 000               |
+| STANDARD     | 6                    | 12                  | 2 500               |
+| PROFESSIONAL | 12                   | 24                  | 5 000               |
+| CORPORATE    | 24                   | 48                  | 10 000              |
+| Enterprise   | после MVP            | после MVP           | после MVP           |
+
+Лимит сессий — это бюджет на распределение между AnalysisTarget. Юзер сам аллоцирует sessionsBudget на каждую цель (минимум 100, максимум — оставшийся свободный баланс). Сумма аллокаций не может превышать sessionsLimit. Анализ цели запускается когда у неё накоплено ≥100 сессий (status = READY).
+
+Кулдаун в днях между анализами одной цели **не используется** — его роль выполняет накопление сессий и переход цели в COMPLETED после анализа (см. DECISIONS.md «2026-04-27: Модель „Бюджеты сессий на цель“»).
 
 Enterprise тариф на MVP не реализован (см. DECISIONS.md «2026-04-27: Модель Subscription и SubscriptionEvent»). Когда появится первый Enterprise-клиент — добавим миграцией ENTERPRISE в enum SubscriptionTier и поле customLimits Json? в Subscription.
 
@@ -299,33 +360,34 @@ Enterprise тариф на MVP не реализован (см. DECISIONS.md «2
 
 ### Условия запуска нового анализа
 
-Для запуска нового анализа должны выполняться ВСЕ четыре условия одновременно (см. DECISIONS.md):
+Для запуска нового анализа должны выполняться ВСЕ условия одновременно (см. DECISIONS.md):
 
-1. **Цель добавлена в список целей сайта** — нельзя запустить анализ по случайному URL, только по заранее настроенному `AnalysisTarget` с `archivedAt IS NULL` и `siteId` соответствующего сайта.
+1. **Цель в статусе READY** — у цели накоплено ≥100 сессий в текущем периоде. До этого момента кнопка «Запустить анализ» неактивна.
+
+   Технически: `AnalysisTarget.status = READY` (выставляется автоматически при `sessionsCollected ≥ 100`).
 
 2. **Все топ-10 рекомендаций предыдущего анализа этой же цели обработаны** — в статусе DONE или REJECTED. Рекомендации в статусе NEW или IN_PROGRESS блокируют запуск нового анализа этой цели. Анализы других целей не блокируют.
 
-   Технически: `COUNT(Recommendation WHERE analysisId = previous_for_this_target AND sortOrder <= 10 AND status IN ('NEW', 'IN_PROGRESS')) == 0`, где `previous_for_this_target` — последний `Analysis` с этим `targetId`.
+   Технически: `COUNT(Recommendation WHERE analysisId = previous_for_this_target AND sortOrder <= 10 AND status IN ('NEW', 'IN_PROGRESS')) == 0`, где `previous_for_this_target` — последний завершённый Analysis с этим targetId в текущем платёжном периоде.
 
    Рекомендации с `sortOrder > 10` (скрытые под «Показать ещё») на блокировку не влияют.
 
-3. **Прошло минимум N дней с момента предыдущего анализа этой же цели** — для накопления метрик и проявления эффекта от внедрённых изменений. Длительность кулдауна зависит от тарифа:
-   - BASIC, STANDARD: N = 7 дней
-   - PROFESSIONAL, CORPORATE: N = 3 дня
-   - Enterprise: N из `Subscription.customLimits.cooldownDays`
+3. **Не превышен месячный лимит анализов по сайту**:
 
-   Технически: `NOW() - previousAnalysisForThisTarget.createdAt >= N days`. Кулдаун считается на пару (siteId, targetId), не глобально по сайту.
-
-4. **Не превышен месячный лимит анализов по сайту**:
    - BASIC: максимум 4 анализа в месяц
-   - STANDARD: максимум 12 анализов в месяц
-   - PROFESSIONAL: максимум 24 анализа в месяц
-   - CORPORATE: максимум 48 анализов в месяц
-   - Enterprise: кастомные лимиты из `Subscription.customLimits.analysesPerMonth`
+   - STANDARD: максимум 12
+   - PROFESSIONAL: максимум 24
+   - CORPORATE: максимум 48
 
-   Лимит общий по всему сайту в любой комбинации целей. Счётчик `Subscription.analysesUsedThisMonth` сбрасывается в начале каждого платёжного периода.
+   Лимит общий по всему сайту в любой комбинации целей. Счётчик `Subscription.analysesUsedThisPeriod` сбрасывается в начале каждого платёжного периода.
 
-Если хотя бы одно условие не выполнено — кнопка «Запустить анализ» на фронте заблокирована с пояснением, какое именно условие не выполнено и для какой цели.
+После запуска анализа цель переходит в статус ANALYZING, скрипт немедленно перестаёт писать сессии в эту цель. По завершении анализа цель → COMPLETED, в этом периоде повторный анализ невозможен. Сброс цели в ACTIVE происходит при наступлении нового платёжного периода.
+
+Параллельные анализы разрешены — юзер может запустить анализ нескольких целей одновременно (ограничение только пунктом 3, лимитом анализов в месяц).
+
+Кулдаун в днях между анализами одной цели **отменён** — его функцию выполняет переход цели в COMPLETED. См. DECISIONS.md «2026-04-27: Модель „Бюджеты сессий на цель“».
+
+Если хотя бы одно условие не выполнено — кнопка «Запустить анализ» на фронте заблокирована с пояснением, какое именно условие не выполнено и для какой цели (например: «Накоплено 67/100 сессий» или «Обработайте 3 оставшиеся рекомендации»).
 
 ---
 

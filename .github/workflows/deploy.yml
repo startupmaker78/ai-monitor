@@ -1,0 +1,118 @@
+name: Deploy to Yandex Cloud (staging)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+env:
+  YC_FOLDER_ID: b1gldbqt279ed94nrnpt
+  YC_REGISTRY_ID: crps6cjjiemm3isfdt50
+  YC_GH_ACTIONS_SA_ID: ajek4rhn7uhdpoolkeku
+  YC_RUNTIME_SA_ID: aje8vk01bgb0ij6rfgan
+  YC_CONTAINER_NAME: webmonitor-staging
+  YC_LOCKBOX_SECRET_ID: e6q7u31vmglihgr4658s
+  IMAGE_REPO: webmonitor
+
+jobs:
+  deploy:
+    name: Build, push, deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get Yandex Cloud IAM token via WIF
+        id: yc-iam-token
+        uses: yc-actions/yc-iam-token-fed@v1
+        with:
+          yc-sa-id: ${{ env.YC_GH_ACTIONS_SA_ID }}
+
+      - name: Login to Yandex Container Registry
+        uses: yc-actions/yc-cr-login@v3
+        with:
+          yc-iam-token: ${{ steps.yc-iam-token.outputs.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:${{ github.sha }}
+            cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy Serverless Container revision
+        id: deploy
+        uses: yc-actions/yc-sls-container-deploy@v4
+        with:
+          yc-iam-token: ${{ steps.yc-iam-token.outputs.token }}
+          container-name: ${{ env.YC_CONTAINER_NAME }}
+          folder-id: ${{ env.YC_FOLDER_ID }}
+          revision-service-account-id: ${{ env.YC_RUNTIME_SA_ID }}
+          revision-cores: 1
+          revision-memory: 512Mb
+          revision-core-fraction: 100
+          revision-concurrency: 8
+          revision-image-url: cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:${{ github.sha }}
+          revision-execution-timeout: 30
+          revision-secrets: |
+            DATABASE_URL=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/DATABASE_URL
+            AUTH_SECRET=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/AUTH_SECRET
+            AUTH_URL=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/AUTH_URL
+            YOS_BUCKET_NAME=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_BUCKET_NAME
+            YOS_ENDPOINT=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_ENDPOINT
+            YOS_REGION=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_REGION
+            YOS_ACCESS_KEY_ID=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_ACCESS_KEY_ID
+            YOS_SECRET_ACCESS_KEY=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_SECRET_ACCESS_KEY
+            YOS_PUBLIC_URL=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_PUBLIC_URL
+            ANTHROPIC_API_KEY=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/ANTHROPIC_API_KEY
+            METRIKA_CLIENT_ID=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/METRIKA_CLIENT_ID
+            METRIKA_CLIENT_SECRET=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/METRIKA_CLIENT_SECRET
+            YOOKASSA_SHOP_ID=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOOKASSA_SHOP_ID
+            YOOKASSA_SECRET_KEY=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOOKASSA_SECRET_KEY
+            RESEND_API_KEY=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/RESEND_API_KEY
+            IP_HASH_SALT=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/IP_HASH_SALT
+
+      - name: Smoke test deployed container
+        run: |
+          CONTAINER_URL="https://bbarn8gnskqll4cjnkhm.containers.yandexcloud.net"
+
+          echo "=== Health check ==="
+          sleep 10
+          curl -fsS -o /tmp/health.json -w "Status: %{http_code}\n" \
+            "$CONTAINER_URL/api/health" || (echo "HEALTH FAILED"; cat /tmp/health.json; exit 1)
+          cat /tmp/health.json
+
+          echo ""
+          echo "=== Landing / ==="
+          curl -fsS -o /dev/null -w "Status: %{http_code}\n" "$CONTAINER_URL/" \
+            || (echo "LANDING FAILED"; exit 1)
+
+          echo ""
+          echo "=== /login ==="
+          curl -fsS -o /dev/null -w "Status: %{http_code}\n" "$CONTAINER_URL/login" \
+            || (echo "LOGIN FAILED"; exit 1)
+
+          echo ""
+          echo "=== /signup ==="
+          curl -fsS -o /dev/null -w "Status: %{http_code}\n" "$CONTAINER_URL/signup" \
+            || (echo "SIGNUP FAILED"; exit 1)
+
+          echo ""
+          echo "✅ All smoke tests passed"

@@ -22,7 +22,7 @@
 - Cloud: `webmonitor` (id: `b1g9kfq92s3sivmv08gq`)
 - Folder: `production` (id: `b1gldbqt279ed94nrnpt`)
 - Default zone: `ru-central1-a`
-- Domain: `вебмонитор.рф` → Punycode: `xn--c1adqlhcfej.xn--p1ai`
+- Domain: `вебмонитор.рф` → Punycode: `xn--90abjntggcss.xn--p1ai`
 
 ## Container Registry
 
@@ -63,9 +63,61 @@
   - Subject: `repo:startupmaker78/ai-monitor:ref:refs/heads/main`
   - Linked SA: `github-actions-sa` (`ajek4rhn7uhdpoolkeku`)
 
+## DNS
+
+### Yandex DNS Zone
+
+- Name: webmonitor-rf
+- ID: dnsa0s229tdrk67c0kga
+- Domain (Punycode): xn--90abjntggcss.xn--p1ai.
+- Domain (Cyrillic): вебмонитор.рф.
+- Visibility: public
+
+### Punycode преобразование
+
+Кириллические домены передаются в DNS системе только в ASCII-форме
+через стандарт Punycode. Преобразование одностороннее:
+
+вебмонитор.рф → xn--90abjntggcss.xn--p1ai
+
+Везде где речь о DNS-записях, теге script src, URL в коде, конфиге
+Resend — используем Punycode. В UI и текстах — кириллицу.
+
+Команда для проверки преобразования:
+
+  node -e "console.log(require('punycode').toASCII('вебмонитор.рф'))"
+
+ВАЖНО: всегда проверяй Punycode через эту команду перед созданием
+DNS-ресурсов. Stale значения из памяти/документации — частая причина
+багов.
+
+### NS-серверы Yandex (для регистратора REG.RU)
+
+Yandex Cloud DNS использует общий пул NS для всех публичных зон:
+
+  ns1.yandexcloud.net.
+  ns2.yandexcloud.net.
+
+### Делегирование домена в REG.RU (ручной шаг)
+
+После смены NS в REG.RU пропагация занимает 24-48 часов.
+Этот шаг выполняется ОДИН РАЗ при первичной настройке.
+
+1. Зайти в личный кабинет REG.RU: https://www.reg.ru/user/account/
+2. Открыть управление доменом вебмонитор.рф
+3. Найти раздел "DNS-серверы" / "Управление DNS / именными серверами"
+4. Выбрать опцию "Использовать собственные DNS-серверы"
+5. Ввести NS-серверы Yandex из секции выше
+6. Сохранить изменения
+
+Проверка пропагации (через сутки после смены NS):
+
+  dig +short NS xn--90abjntggcss.xn--p1ai
+
+Должен вернуть NS-серверы Yandex (ns*.yandexcloud.net), не REG.RU.
+
 ## Что ещё будет создано
 
-- DNS-зона `xn--c1adqlhcfej.xn--p1ai` (коммит 2b)
 - Lockbox secret `webmonitor-staging-secrets` (коммит 2c)
 - Serverless Container `webmonitor-staging` (коммит 2c)
-- Let's Encrypt certificate для `staging.xn--c1adqlhcfej.xn--p1ai` (коммит 4)
+- Let's Encrypt certificate для `staging.xn--90abjntggcss.xn--p1ai` (коммит 4)

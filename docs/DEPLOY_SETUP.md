@@ -39,6 +39,9 @@
   - container-registry.images.pusher
   - serverless.containers.editor
   - iam.serviceAccounts.user
+  - lockbox.viewer (read metadata of secrets — needed by yc-sls-container-deploy
+    to validate revision-secrets format. Does NOT grant access to secret values
+    — это `lockbox.payloadViewer`, который выдан только runtime-sa.)
 
 ### webmonitor-runtime-sa
 - ID: `aje8vk01bgb0ij6rfgan`

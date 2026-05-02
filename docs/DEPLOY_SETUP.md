@@ -16,6 +16,13 @@
   который встречается в части документации, в yc CLI 1.6 не работает.
 - `--format value(id)` не поддерживается. Используй `--format json | jq -r '.id'`
   или просто визуально извлекай из вывода.
+- КАНОНИЧНОЕ имя роли — через ТОЧКУ: `serverless.containers.editor`
+  (как в официальной документации Yandex IAM). README yc-actions использует
+  ДЕФИС: `serverless-containers.editor` — это TYPO. Yandex принимает обе формы
+  при добавлении binding'а БЕЗ ошибки, но binding с typo-формой не имеет
+  реальных permissions (такой роли в каталоге нет). Всегда проверяй каноничное
+  имя по https://cloud.yandex.com/docs/iam/concepts/access-control/roles
+  перед добавлением binding'а.
 
 ## Окружение
 
@@ -37,11 +44,16 @@
 - Назначение: CI/CD из GitHub Actions
 - Роли (на folder production):
   - container-registry.images.pusher
-  - serverless.containers.editor
+  - serverless.containers.admin (was editor — admin needed when both
+    revision-service-account-id and revision-secrets are set in deploy action)
   - iam.serviceAccounts.user
   - lockbox.viewer (read metadata of secrets — needed by yc-sls-container-deploy
     to validate revision-secrets format. Does NOT grant access to secret values
     — это `lockbox.payloadViewer`, который выдан только runtime-sa.)
+- Дополнительные binding'и (на конкретные ресурсы):
+  - `iam.serviceAccounts.user` → на runtime-SA `aje8vk01bgb0ij6rfgan`
+    (Folder-level `iam.serviceAccounts.user` недостаточно — нужен явный binding
+    на конкретный SA для использования его в качестве revision identity.)
 
 ### webmonitor-runtime-sa
 - ID: `aje8vk01bgb0ij6rfgan`

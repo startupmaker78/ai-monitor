@@ -42,6 +42,14 @@ enum SubscriptionEventType {
   EXPIRED
 }
 
+enum AnalysisTargetStatus {
+  ACTIVE
+  READY
+  ANALYZING
+  COMPLETED
+  ARCHIVED
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -95,27 +103,48 @@ model Site {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  sessions Session[]
+  sessions        Session[]
+  analysisTargets AnalysisTarget[]
 
   @@index([ownerId])
 }
 
 model Session {
-  id               String    @id @default(cuid())
+  id               String          @id @default(cuid())
   siteId           String
-  site             Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
-  sessionToken     String    @unique
-  ipHash           String    @db.Char(64)
-  userAgent        String    @db.Text
+  site             Site            @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  sessionToken     String          @unique
+  ipHash           String          @db.Char(64)
+  userAgent        String          @db.Text
   startedAt        DateTime
   endedAt          DateTime?
-  eventsCount      Int       @default(0)
+  eventsCount      Int             @default(0)
   storageKey       String?
   analysisTargetId String?
+  analysisTarget   AnalysisTarget? @relation(fields: [analysisTargetId], references: [id], onDelete: SetNull)
 
   @@index([siteId, startedAt])
   @@index([startedAt])
   @@index([analysisTargetId])
+}
+
+model AnalysisTarget {
+  id                String               @id @default(cuid())
+  siteId            String
+  site              Site                 @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  url               String
+  name              String?
+  sessionsBudget    Int
+  sessionsCollected Int                  @default(0)
+  status            AnalysisTargetStatus @default(ACTIVE)
+  archivedAt        DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  sessions Session[]
+
+  @@index([siteId, status])
+  @@index([archivedAt])
 }
 
 model PartnerApplication {

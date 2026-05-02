@@ -28,10 +28,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Login to Yandex Container Registry
-        uses: yc-actions/yc-cr-login@v3
-        with:
-          yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+      - name: Install and configure yc CLI
+        env:
+          SA_KEY: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+        run: |
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i $HOME/yc -n
+          echo "$HOME/yc/bin" >> $GITHUB_PATH
+          export PATH="$HOME/yc/bin:$PATH"
+          KEY_FILE=$(mktemp)
+          trap "rm -f $KEY_FILE" EXIT
+          printf '%s' "$SA_KEY" > "$KEY_FILE"
+          yc config profile create sa-profile
+          yc config set service-account-key "$KEY_FILE"
+          yc config set folder-id ${{ env.YC_FOLDER_ID }}
+
+      - name: Configure Docker auth via yc CLI
+        run: yc container registry configure-docker
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -49,37 +61,29 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Deploy Serverless Container revision
-        id: deploy
-        uses: yc-actions/yc-sls-container-deploy@v4
-        with:
-          yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
-          container-name: ${{ env.YC_CONTAINER_NAME }}
-          folder-id: ${{ env.YC_FOLDER_ID }}
-          revision-service-account-id: ${{ env.YC_RUNTIME_SA_ID }}
-          revision-cores: 1
-          revision-memory: 512Mb
-          revision-core-fraction: 100
-          revision-concurrency: 8
-          revision-image-url: cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:${{ github.sha }}
-          revision-execution-timeout: 30
-          revision-secrets: |
-            DATABASE_URL=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/DATABASE_URL
-            AUTH_SECRET=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/AUTH_SECRET
-            AUTH_URL=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/AUTH_URL
-            YOS_BUCKET_NAME=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_BUCKET_NAME
-            YOS_ENDPOINT=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_ENDPOINT
-            YOS_REGION=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_REGION
-            YOS_ACCESS_KEY_ID=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_ACCESS_KEY_ID
-            YOS_SECRET_ACCESS_KEY=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_SECRET_ACCESS_KEY
-            YOS_PUBLIC_URL=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOS_PUBLIC_URL
-            ANTHROPIC_API_KEY=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/ANTHROPIC_API_KEY
-            METRIKA_CLIENT_ID=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/METRIKA_CLIENT_ID
-            METRIKA_CLIENT_SECRET=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/METRIKA_CLIENT_SECRET
-            YOOKASSA_SHOP_ID=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOOKASSA_SHOP_ID
-            YOOKASSA_SECRET_KEY=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/YOOKASSA_SECRET_KEY
-            RESEND_API_KEY=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/RESEND_API_KEY
-            IP_HASH_SALT=${{ env.YC_LOCKBOX_SECRET_ID }}/latest/IP_HASH_SALT
+      - name: Deploy Serverless Container revision via yc CLI
+        run: |
+          SECRET_ARGS=""
+          for k in DATABASE_URL AUTH_SECRET AUTH_URL \
+                   YOS_BUCKET_NAME YOS_ENDPOINT YOS_REGION \
+                   YOS_ACCESS_KEY_ID YOS_SECRET_ACCESS_KEY YOS_PUBLIC_URL \
+                   ANTHROPIC_API_KEY \
+                   METRIKA_CLIENT_ID METRIKA_CLIENT_SECRET \
+                   YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY \
+                   RESEND_API_KEY IP_HASH_SALT; do
+            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},key=$k,environment-variable=$k"
+          done
+
+          eval yc serverless container revision deploy \
+            --container-name ${{ env.YC_CONTAINER_NAME }} \
+            --image cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:${{ github.sha }} \
+            --cores 1 \
+            --memory 512MB \
+            --core-fraction 100 \
+            --concurrency 8 \
+            --execution-timeout 30s \
+            --service-account-id ${{ env.YC_RUNTIME_SA_ID }} \
+            $SECRET_ARGS
 
       - name: Smoke test deployed container
         run: |

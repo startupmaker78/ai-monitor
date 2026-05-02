@@ -50,6 +50,31 @@ enum AnalysisTargetStatus {
   ARCHIVED
 }
 
+enum MetricsSource {
+  METRIKA
+  MANUAL
+}
+
+enum AnalysisStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum RecommendationPriority {
+  CRITICAL
+  IMPORTANT
+  GOOD
+}
+
+enum RecommendationStatus {
+  NEW
+  IN_PROGRESS
+  DONE
+  REJECTED
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -63,6 +88,7 @@ model User {
   ownerProfile         OwnerProfile?
   applications         PartnerApplication[] @relation("ApplicantApplications")
   reviewedApplications PartnerApplication[] @relation("ReviewedApplications")
+  analysesRequested    Analysis[]           @relation("AnalysesRequested")
 }
 
 model ContractorProfile {
@@ -103,8 +129,10 @@ model Site {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  sessions        Session[]
-  analysisTargets AnalysisTarget[]
+  sessions         Session[]
+  analysisTargets  AnalysisTarget[]
+  metricsSnapshots MetricsSnapshot[]
+  analyses         Analysis[]
 
   @@index([ownerId])
 }
@@ -142,9 +170,71 @@ model AnalysisTarget {
   updatedAt         DateTime             @updatedAt
 
   sessions Session[]
+  analyses Analysis[]
 
   @@index([siteId, status])
   @@index([archivedAt])
+}
+
+model MetricsSnapshot {
+  id                 String        @id @default(cuid())
+  siteId             String
+  site               Site          @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  date               DateTime      @db.Date
+  visits             Int
+  uniqueVisitors     Int
+  conversions        Int
+  bounceRate         Decimal       @db.Decimal(5, 2)
+  avgSessionDuration Int
+  goals              Json?
+  source             MetricsSource @default(METRIKA)
+  createdAt          DateTime      @default(now())
+
+  @@unique([siteId, date])
+}
+
+model Analysis {
+  id                   String         @id @default(cuid())
+  siteId               String
+  site                 Site           @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  targetId             String
+  target               AnalysisTarget @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  requestedById        String
+  requestedBy          User           @relation("AnalysesRequested", fields: [requestedById], references: [id], onDelete: Restrict)
+  status               AnalysisStatus @default(PENDING)
+  prompt               String?        @db.Text
+  sessionsAnalyzed     Int            @default(0)
+  tokensUsed           Int            @default(0)
+  recommendationsCount Int            @default(0)
+  createdAt            DateTime       @default(now())
+  completedAt          DateTime?
+
+  recommendations Recommendation[]
+
+  @@index([siteId, createdAt])
+  @@index([targetId, createdAt])
+}
+
+model Recommendation {
+  id              String                 @id @default(cuid())
+  analysisId      String
+  analysis        Analysis               @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  priority        RecommendationPriority
+  title           String
+  description     String                 @db.Text
+  metric          String?
+  status          RecommendationStatus   @default(NEW)
+  sortOrder       Int
+  rejectionReason String?                @db.Text
+  acceptedAt      DateTime?
+  appliedAt       DateTime?
+  metricsBefore   Json?
+  metricsAfter    Json?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([analysisId, sortOrder])
+  @@index([status])
 }
 
 model PartnerApplication {

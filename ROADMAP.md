@@ -55,22 +55,32 @@
 
 ---
 
-## Этап 0.c — Полная схема БД 🔄 в работе
+## Этап 0.c — Полная схема БД ✅ СДЕЛАНО
 
 **Цель:** все модели из ARCHITECTURE.md перенесены в schema.prisma через отдельные миграции.
 
-- [ ] 0.c.1 Расширить User (уже готов) — при необходимости добавить недостающие поля
-- [ ] 0.c.2 ContractorProfile + OwnerProfile (с nullable contractorId) + PartnerApplication (relations на User)
-- [ ] 0.c.3 Site (с полем isDemo) + Session
-- [x] 0.c.4 Subscription (BASIC/STANDARD/PROFESSIONAL/CORPORATE) + SubscriptionEvent ✅
-- [ ] 0.c.5 MetricsSnapshot + AnalysisTarget + Analysis (с FK targetId на AnalysisTarget) + Recommendation
-- [ ] 0.c.6 InviteToken
+- [x] 0.c.1 Расширить User (уже готов) — при необходимости добавить недостающие поля
+- [x] 0.c.2 ContractorProfile + OwnerProfile (с nullable contractorId) + PartnerApplication (relations на User)
+- [x] 0.c.3 Site (с полем isDemo) + Session
+- [x] 0.c.4 Subscription (BASIC/STANDARD/PROFESSIONAL/CORPORATE) + SubscriptionEvent
+- [x] 0.c.5 MetricsSnapshot + AnalysisTarget + Analysis (с FK targetId на AnalysisTarget) + Recommendation + рефакторинг OwnerProfile (удалены дублирующие metrika-поля, выпилен tildaSiteId) + расширение Subscription (sessionsLimit, sessionsAllocated) и Session (analysisTargetId FK)
+- [x] 0.c.6 InviteToken
 
 Каждая миграция = отдельный коммит. После каждой — npm run prisma migrate status должен возвращать "up to date".
 
 **Важно:** в этапе 0.c.5 порядок имеет значение — AnalysisTarget создаётся ПЕРЕД Analysis, потому что Analysis имеет NOT NULL FK на AnalysisTarget.
 
-**Оценка:** 1-2 дня.
+**Результат:** 8 миграций применены, 13 моделей, 10 enum'ов. Фундамент БД для MVP готов.
+
+Применённые миграции:
+- 20260422000000_init_user_model
+- 20260424222904_add_profiles_and_applications
+- 20260427195717_add_subscription_and_events
+- 20260427223955_add_site_and_session
+- 20260502200505_refactor_owner_profile_extend_subscription_session
+- 20260502201131_add_analysis_target_and_session_fk
+- 20260502202117_add_metrics_analysis_recommendation
+- 20260502202619_add_invite_token
 
 ---
 

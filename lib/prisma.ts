@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
 
 const CERT_PATH = path.join(os.homedir(), ".postgresql", "root.crt")
 
-function createPrismaClient() {
+function createPrismaClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set")
@@ -23,7 +23,6 @@ function createPrismaClient() {
   }
   const ca = fs.readFileSync(CERT_PATH, "utf8")
 
-  // pg ssl options передаём объектом, sslmode/sslrootcert из URL убираем
   const url = new URL(connectionString)
   url.searchParams.delete("sslmode")
   url.searchParams.delete("sslrootcert")
@@ -36,6 +35,20 @@ function createPrismaClient() {
   return new PrismaClient({ adapter })
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient()
+function createLazyPrisma(): PrismaClient {
+  let instance: PrismaClient | undefined
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma
+  return new Proxy({} as PrismaClient, {
+    get(_target, prop) {
+      if (!instance) {
+        instance = globalForPrisma.prisma ?? createPrismaClient()
+        if (process.env.NODE_ENV !== "production") {
+          globalForPrisma.prisma = instance
+        }
+      }
+      return Reflect.get(instance, prop, instance)
+    },
+  })
+}
+
+export const prisma = createLazyPrisma()

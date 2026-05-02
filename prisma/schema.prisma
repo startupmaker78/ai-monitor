@@ -69,22 +69,14 @@ model ContractorProfile {
   clients OwnerProfile[]
 }
 
-// TODO(2026-04-27): дублирование с Site — siteUrl/tildaSiteId/metrikaCounterId/metrikaToken
-// пересекаются с тем, что должно жить в Site. Разрулить на этапе 0.c.5
-// (см. DECISIONS.md «2026-04-27: Открытый вопрос — дублирование metrika-полей
-// между OwnerProfile и Site»).
 model OwnerProfile {
-  id               String             @id @default(cuid())
-  userId           String             @unique
-  user             User               @relation(fields: [userId], references: [id], onDelete: Restrict)
-  contractorId     String?
-  contractor       ContractorProfile? @relation(fields: [contractorId], references: [id], onDelete: Restrict)
-  siteUrl          String?
-  tildaSiteId      String?
-  metrikaCounterId String?
-  metrikaToken     String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id           String             @id @default(cuid())
+  userId       String             @unique
+  user         User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  contractorId String?
+  contractor   ContractorProfile? @relation(fields: [contractorId], references: [id], onDelete: Restrict)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
 
   sites              Site[]
   subscription       Subscription?
@@ -92,14 +84,16 @@ model OwnerProfile {
 }
 
 model Site {
-  id            String       @id @default(cuid())
-  ownerId       String
-  owner         OwnerProfile @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  domain        String
-  trackingToken String       @unique
-  isDemo        Boolean      @default(false)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  id               String       @id @default(cuid())
+  ownerId          String
+  owner            OwnerProfile @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  domain           String
+  trackingToken    String       @unique
+  isDemo           Boolean      @default(false)
+  metrikaCounterId String?
+  metrikaToken     String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   sessions Session[]
 
@@ -107,19 +101,21 @@ model Site {
 }
 
 model Session {
-  id           String    @id @default(cuid())
-  siteId       String
-  site         Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
-  sessionToken String    @unique
-  ipHash       String    @db.Char(64)
-  userAgent    String    @db.Text
-  startedAt    DateTime
-  endedAt      DateTime?
-  eventsCount  Int       @default(0)
-  storageKey   String?
+  id               String    @id @default(cuid())
+  siteId           String
+  site             Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  sessionToken     String    @unique
+  ipHash           String    @db.Char(64)
+  userAgent        String    @db.Text
+  startedAt        DateTime
+  endedAt          DateTime?
+  eventsCount      Int       @default(0)
+  storageKey       String?
+  analysisTargetId String?
 
   @@index([siteId, startedAt])
   @@index([startedAt])
+  @@index([analysisTargetId])
 }
 
 model PartnerApplication {
@@ -150,6 +146,8 @@ model Subscription {
   currentPeriodEnd        DateTime
   analysesUsedThisPeriod  Int                @default(0)
   analysesLimit           Int
+  sessionsLimit           Int
+  sessionsAllocated       Int                @default(0)
   cancelAtPeriodEnd       Boolean            @default(false)
   yookassaCustomerId      String?
   yookassaPaymentMethodId String?

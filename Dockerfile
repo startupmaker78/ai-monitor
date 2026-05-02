@@ -28,7 +28,9 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=3000
+# PORT приходит из runtime (Yandex Serverless передаёт 8080).
+# HOSTNAME=0.0.0.0 обязателен — Next.js по умолчанию слушает только на localhost,
+# что не работает в контейнере.
 ENV HOSTNAME=0.0.0.0
 
 RUN mkdir -p /home/node/.postgresql
@@ -42,7 +44,5 @@ COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 
 COPY --from=builder --chown=node:node /app/node_modules/.prisma/client ./node_modules/.prisma/client
 COPY --from=builder --chown=node:node /app/node_modules/@prisma/client ./node_modules/@prisma/client
-
-EXPOSE 3000
 
 CMD ["node", "server.js"]

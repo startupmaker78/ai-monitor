@@ -100,7 +100,8 @@ model ContractorProfile {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  clients OwnerProfile[]
+  clients      OwnerProfile[]
+  inviteTokens InviteToken[]
 }
 
 model OwnerProfile {
@@ -253,6 +254,21 @@ model PartnerApplication {
   reviewedAt      DateTime?
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
+}
+
+model InviteToken {
+  id           String            @id @default(cuid())
+  contractorId String
+  contractor   ContractorProfile @relation(fields: [contractorId], references: [id], onDelete: Restrict)
+  email        String
+  token        String            @unique
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime          @default(now())
+
+  @@index([contractorId])
+  @@index([email])
+  @@index([expiresAt])
 }
 
 model Subscription {

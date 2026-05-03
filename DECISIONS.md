@@ -697,3 +697,26 @@ now() сервера.
 receivedAt (уже пишется в Object Storage в коммите 4/8) для расчёта
 времени между пакетами вместо client ts. Расхождение между receivedAt
 последнего пакета и предыдущей Meta события — корректная длительность.
+
+---
+
+## 2026-05-03 — CRON_SECRET в Timer Trigger payload (acceptable)
+
+Yandex Timer Trigger → Serverless Container не позволяет передавать
+кастомные HTTP headers. Auth для /api/cron/cleanup-old-sessions сделан
+через body.messages[0].details.payload, который Timer Trigger получает
+из --payload флага при создании.
+
+**Минус:** secret лежит в Trigger config в plaintext. Видим всем у кого
+есть iam.viewer на serverless.triggers.
+
+**Acceptable, потому что:**
+- Secret даёт доступ только к удалению старых сессий (старше 30 дней),
+  не к чтению данных юзеров
+- Никто не получает iam.viewer на Triggers без явного действия
+  администратора
+- Альтернатива (API Gateway с auth-mapping) добавляет лишний ресурс
+  и SSL-конфиг ради одной cron-задачи
+
+**Когда фикс:** при появлении реальных клиентов и compliance требований
+— перевести на API Gateway или Workload Identity для Trigger SA.

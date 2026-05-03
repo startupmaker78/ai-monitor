@@ -224,6 +224,92 @@ yc lockbox secret add-version <secret-id> \
 
 **Revisions:** создаются автоматически из GitHub Actions при push в main.
 
+## Timer Trigger для cleanup старых сессий
+
+Cron-удаление сессий старше 30 дней через Yandex Timer Trigger,
+который дёргает endpoint `/api/cron/cleanup-old-sessions` нашего
+Serverless Container.
+
+Auth через `CRON_SECRET` в payload trigger'а — Timer Trigger не
+поддерживает кастомные HTTP headers, поэтому secret лежит в
+`body.messages[0].details.payload`. Подробнее: DECISIONS.md
+«2026-05-03 — CRON_SECRET в Timer Trigger payload».
+
+### Setup (one-time, при первом разворачивании окружения)
+
+1. Сгенерировать CRON_SECRET:
+
+   ```
+   openssl rand -hex 32
+   ```
+
+   Сохранить значение — оно понадобится в шагах 2 и 3.
+
+2. Добавить CRON_SECRET в Lockbox.
+
+   ⚠️ ВАЖНО: `yc lockbox add-version` полностью заменяет payload.
+   Сначала вытащить полный текущий payload, потом добавить ключ:
+
+   ```
+   # Получить текущий payload (для команды ниже нужно собрать полный
+   # список из значений которые ты знаешь, либо из локального .env.local).
+   yc lockbox secret get e6q7u31vmglihgr4658s --payload
+
+   # Собрать новый payload (17 старых ключей + CRON_SECRET) и
+   # отправить как новую версию:
+   yc lockbox secret add-version e6q7u31vmglihgr4658s \
+     --payload '[
+       {"key":"DATABASE_URL","text_value":"<value>"},
+       {"key":"AUTH_SECRET","text_value":"<value>"},
+       ... (все 17 существующих ключей)
+       {"key":"CRON_SECRET","text_value":"<значение из шага 1>"}
+     ]'
+   ```
+
+3. Создать Timer Trigger.
+
+   Используем существующий `webmonitor-runtime-sa`
+   (`aje8vk01bgb0ij6rfgan`) — у него уже есть роль
+   `serverless.containers.invoker` (см. секцию Serverless Container,
+   binding для API Gateway), новый SA создавать не нужно.
+
+   ```
+   yc serverless trigger create timer \
+     --name webmonitor-cleanup-old-sessions \
+     --cron-expression '0 1 * * ? *' \
+     --invoke-container-id bbarn8gnskqll4cjnkhm \
+     --invoke-container-path /api/cron/cleanup-old-sessions \
+     --invoke-container-service-account-id aje8vk01bgb0ij6rfgan \
+     --payload '<значение CRON_SECRET из шага 1>'
+   ```
+
+   Cron `0 1 * * ? *` = каждый день в 01:00 UTC = 04:00 МСК. Низкий
+   трафик, не пересекается с workday.
+
+4. Обновить deploy.yml — УЖЕ сделано в коммите 8/8 (CRON_SECRET
+   добавлен в SECRET_ARGS цикл). После следующего деплоя контейнер
+   подхватит CRON_SECRET из Lockbox автоматически.
+
+5. Smoke test — ручной вызов через curl с body-payload:
+
+   ```
+   curl -X POST https://staging.вебмонитор.рф/api/cron/cleanup-old-sessions \
+     -H "Content-Type: application/json" \
+     -d '{"messages":[{"details":{"payload":"<CRON_SECRET>"}}]}'
+   ```
+
+   Ожидаем 200 + `{"ok":true,"deletedSessions":N,"deletedObjects":M,"errors":[]}`.
+   Без правильного payload — 401.
+
+### Verifying it works
+
+- Trigger список: `yc serverless trigger list`
+- Логи контейнера: `yc logging read --resource-type serverless.functions ...`
+  или через Console → Cloud Logging
+- Ожидаем строку `[cron-cleanup] deleted N sessions, M objects, ...`
+- Если N=0 — всё работает, просто старых сессий нет (нормально первые
+  30 дней после запуска)
+
 ## API Gateway
 
 Yandex Serverless Containers НЕ поддерживают direct custom domain binding.

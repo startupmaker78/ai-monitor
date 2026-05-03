@@ -4,6 +4,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
 } from "@aws-sdk/client-s3"
 
 type RequiredEnv =
@@ -125,4 +126,24 @@ export async function deleteObject(key: string): Promise<void> {
       Key: key,
     }),
   )
+}
+
+// Удаляет до 1000 объектов одним batch-запросом.
+// S3 API limit: 1000 ключей за вызов.
+// Возвращает массив ключей которые НЕ удалились (errors).
+export async function deleteObjects(keys: string[]): Promise<string[]> {
+  if (keys.length === 0) return []
+  if (keys.length > 1000) {
+    throw new Error("deleteObjects: max 1000 keys per call")
+  }
+  const result = await s3Client.send(
+    new DeleteObjectsCommand({
+      Bucket: getBucketName(),
+      Delete: {
+        Objects: keys.map((Key) => ({ Key })),
+        Quiet: true,
+      },
+    }),
+  )
+  return (result.Errors ?? []).map((e) => e.Key ?? "<unknown>")
 }

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:connections": "tsx scripts/test-connections.ts",
+    "test:storage": "tsx scripts/test-storage.ts",
     "prisma": "dotenv -e .env.local -- prisma"
   },
   "dependencies": {

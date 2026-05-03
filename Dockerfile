@@ -22,6 +22,10 @@ COPY . .
 # npm run build НЕ требует placeholder благодаря lazy init в lib/prisma.ts.
 RUN DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder" \
     npx prisma generate
+# Build tracker.js bundle (esbuild → public/tracker.js).
+# Must run BEFORE next build because Next.js standalone snapshot
+# picks up public/ at build time.
+RUN npm run build:tracker
 RUN npm run build
 
 FROM node:20-alpine AS runner
@@ -41,6 +45,10 @@ USER node
 
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+
+# Public assets (tracker.js bundle for embedding on customer sites).
+# Next.js standalone does NOT auto-copy public/ — must be explicit.
+COPY --from=builder --chown=node:node /app/public ./public
 
 COPY --from=builder --chown=node:node /app/node_modules/.prisma/client ./node_modules/.prisma/client
 COPY --from=builder --chown=node:node /app/node_modules/@prisma/client ./node_modules/@prisma/client

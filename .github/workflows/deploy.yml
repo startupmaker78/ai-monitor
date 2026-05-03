@@ -112,4 +112,71 @@ jobs:
             || (echo "SIGNUP FAILED"; exit 1)
 
           echo ""
+          echo "=== /tracker.js ==="
+          TRACKER_RESPONSE=$(curl -fsS -D /tmp/tracker-headers.txt \
+            "$CONTAINER_URL/tracker.js" -o /tmp/tracker.js \
+            -w "STATUS=%{http_code} SIZE=%{size_download}")
+          echo "$TRACKER_RESPONSE"
+
+          STATUS=$(echo "$TRACKER_RESPONSE" | grep -oP 'STATUS=\K\d+')
+          SIZE=$(echo "$TRACKER_RESPONSE" | grep -oP 'SIZE=\K\d+')
+
+          if [ "$STATUS" != "200" ]; then
+            echo "TRACKER FAILED — expected 200, got $STATUS"
+            exit 1
+          fi
+
+          # Размер должен быть в районе 180 KB (179.5-180.5 KB).
+          # Меньше 100 KB — значит build:tracker не отработал, отдан
+          # placeholder или html-404. Больше 250 KB — забыли --prod (отдан
+          # неминифицированный, ~400 KB).
+          if [ "$SIZE" -lt 100000 ] || [ "$SIZE" -gt 250000 ]; then
+            echo "TRACKER size suspicious: $SIZE bytes (expected ~180000)"
+            exit 1
+          fi
+
+          # Проверим Content-Type — должен быть application/javascript или
+          # text/javascript (Next.js по умолчанию выставляет правильный).
+          CT=$(grep -i '^content-type:' /tmp/tracker-headers.txt | head -1)
+          if ! echo "$CT" | grep -qiE 'javascript'; then
+            echo "TRACKER wrong content-type: $CT"
+            exit 1
+          fi
+
+          # Проверим что это IIFE с нашим banner-комментарием.
+          if ! head -1 /tmp/tracker.js | grep -q 'Webmonitor tracker'; then
+            echo "TRACKER missing 'Webmonitor tracker' banner — wrong file?"
+            head -1 /tmp/tracker.js
+            exit 1
+          fi
+
+          echo "Tracker OK: $SIZE bytes, $CT"
+
+          echo ""
+          echo "=== /api/tracking/collect (OPTIONS preflight) ==="
+          curl -fsS -o /dev/null -w "Status: %{http_code}\n" \
+            -X OPTIONS "$CONTAINER_URL/api/tracking/collect" \
+            -H "Origin: https://example.com" \
+            -H "Access-Control-Request-Method: POST" \
+            || (echo "COLLECT OPTIONS FAILED"; exit 1)
+
+          echo ""
+          echo "=== /api/tracking/collect (POST without token = 401) ==="
+          # Реалистичный негативный тест — несуществующий siteToken должен 401.
+          # Используем -f с allow http_error — иначе curl exit non-zero.
+          COLLECT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$CONTAINER_URL/api/tracking/collect" \
+            -H "Content-Type: application/json" \
+            -d '{"sessionToken":"00000000-0000-4000-8000-000000000000",
+                 "siteToken":"definitely-not-a-real-token",
+                 "packetIndex":0,"isFinal":false,"events":[],
+                 "pageUrl":"https://x/","userAgent":"smoke",
+                 "startedAt":1700000000000}')
+          if [ "$COLLECT_STATUS" != "401" ]; then
+            echo "COLLECT POST expected 401, got $COLLECT_STATUS"
+            exit 1
+          fi
+          echo "Collect 401 on unknown token: OK"
+
+          echo ""
           echo "✅ All smoke tests passed"

@@ -17,3 +17,4 @@ docs/
 __tests__/
 coverage/
 prisma/migrations/migration_lock.toml
+public/test.html

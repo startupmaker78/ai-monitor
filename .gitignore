@@ -44,3 +44,4 @@ next-env.d.ts
 
 # tracker local smoke-test page (not committed; copy to public/ to test)
 /tracker-src/test.html
+/public/test.html

@@ -198,8 +198,8 @@ export async function seedDemoSite({ siteId, userId }: SeedDemoSiteOptions) {
           siteId,
           url: "/",
           name: "Главная страница",
-          sessionsBudget: 100,
-          sessionsCollected: 87,
+          sessionsBudget: 1000,
+          sessionsCollected: 987,
           status: "COMPLETED",
         },
       }),
@@ -208,8 +208,8 @@ export async function seedDemoSite({ siteId, userId }: SeedDemoSiteOptions) {
           siteId,
           url: "/pricing",
           name: "Страница тарифов",
-          sessionsBudget: 50,
-          sessionsCollected: 42,
+          sessionsBudget: 600,
+          sessionsCollected: 523,
           status: "COMPLETED",
         },
       }),
@@ -218,15 +218,28 @@ export async function seedDemoSite({ siteId, userId }: SeedDemoSiteOptions) {
           siteId,
           url: "/about",
           name: "О компании",
-          sessionsBudget: 30,
-          sessionsCollected: 31,
+          sessionsBudget: 400,
+          sessionsCollected: 312,
           status: "COMPLETED",
+        },
+      }),
+      tx.analysisTarget.create({
+        data: {
+          siteId,
+          url: "/blog",
+          name: "Блог",
+          sessionsBudget: 500,
+          sessionsCollected: 71,
+          status: "ACTIVE",
         },
       }),
     ])
 
+    // Analysis создаём только для COMPLETED targets (первые 3).
+    // /blog в ACTIVE — копит сессии, ещё не анализировался.
+    const completedTargets = targets.slice(0, 3)
     const analyses = await Promise.all(
-      targets.map((target, idx) =>
+      completedTargets.map((target, idx) =>
         tx.analysis.create({
           data: {
             siteId,

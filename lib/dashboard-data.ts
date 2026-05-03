@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma"
+import { DEMO_TIER, calculateDemoUsage } from "@/lib/demo-tier-info"
 
 export async function getDashboardData(userId: string) {
   const ownerProfile = await prisma.ownerProfile.findUnique({
@@ -99,6 +100,24 @@ export async function getDashboardData(userId: string) {
 
   const totalActive = counts.CRITICAL + counts.IMPORTANT + counts.GOOD
 
+  const targets = await prisma.analysisTarget.findMany({
+    where: { siteId: site.id },
+    orderBy: [{ status: "asc" }, { sessionsCollected: "desc" }],
+  })
+
+  const monthStart = new Date()
+  monthStart.setUTCDate(1)
+  monthStart.setUTCHours(0, 0, 0, 0)
+
+  const analysesThisMonth = await prisma.analysis.count({
+    where: {
+      siteId: site.id,
+      createdAt: { gte: monthStart },
+    },
+  })
+
+  const usage = calculateDemoUsage(targets, analysesThisMonth)
+
   return {
     site,
     kpi: {
@@ -114,5 +133,11 @@ export async function getDashboardData(userId: string) {
     })),
     recommendations: topRecommendations.slice(0, 10),
     priorityCounts: counts,
+    targets,
+    tier: {
+      name: DEMO_TIER.name,
+      price: DEMO_TIER.pricePerMonth,
+    },
+    usage,
   }
 }

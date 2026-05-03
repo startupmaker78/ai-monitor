@@ -1,9 +1,13 @@
 import Link from "next/link"
 import { Clock, Eye, Lightbulb, Sparkles, TrendingUp } from "lucide-react"
 import { getDashboardData } from "@/lib/dashboard-data"
+import { DEMO_TIER } from "@/lib/demo-tier-info"
 import { KpiCard } from "@/components/dashboard/kpi-card"
 import { VisitsChart } from "@/components/dashboard/visits-chart"
 import { RecommendationCard } from "@/components/dashboard/recommendation-card"
+import { TierBadge } from "@/components/dashboard/tier-badge"
+import { UsageWidget } from "@/components/dashboard/usage-widget"
+import { TargetsList } from "@/components/dashboard/targets-list"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 
@@ -88,6 +92,9 @@ export default async function DemoPage() {
           <p className="mt-1 text-muted-foreground">
             Так выглядит ваш дашборд после подключения сайта. Сводка по {data.site.domain}.
           </p>
+          <div className="mt-3">
+            <TierBadge name={data.tier.name} price={data.tier.price} />
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -117,7 +124,19 @@ export default async function DemoPage() {
           />
         </div>
 
+        <UsageWidget
+          usage={data.usage}
+          tierName={data.tier.name}
+          tierLimits={{
+            targetsLimit: DEMO_TIER.targetsLimit,
+            analysesPerMonth: DEMO_TIER.analysesPerMonth,
+            sessionsLimit: DEMO_TIER.sessionsLimit,
+          }}
+        />
+
         <VisitsChart data={data.chart} />
+
+        <TargetsList targets={data.targets} />
 
         <div>
           <div className="mb-4 flex items-center justify-between">

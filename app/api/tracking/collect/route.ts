@@ -3,6 +3,10 @@ import { trackingPacketSchema } from "@/lib/tracking-schema"
 import { prisma } from "@/lib/prisma"
 import { putJson } from "@/lib/storage"
 import { hashIp, extractClientIp } from "@/lib/ip-hash"
+import {
+  computeDominantUrl,
+  findMatchingTarget,
+} from "@/lib/analysis-target-matcher"
 
 const MAX_BODY_BYTES = 1024 * 1024
 
@@ -143,6 +147,51 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { error: "session_upsert_failed" },
       { status: 500 },
     )
+  }
+
+  // Шаг 8: матчинг AnalysisTarget по доминантному URL — только на
+  // финальном пакете (когда сессия закрыта и таймлайн полный). Ошибки
+  // не валят запрос: Session и пакеты уже сохранены, матчинг
+  // best-effort.
+  if (packet.isFinal) {
+    try {
+      const dominantUrl = await computeDominantUrl(
+        site.id,
+        packet.sessionToken,
+        now.getTime(),
+      )
+      if (dominantUrl) {
+        const targetId = await findMatchingTarget(site.id, dominantUrl)
+        if (targetId) {
+          // Идемпотентно: updateMany с условием analysisTargetId=null
+          // выставит target только один раз. Повторный финальный пакет
+          // вернёт count=0, increment второй раз не уйдёт.
+          const updated = await prisma.session.updateMany({
+            where: {
+              sessionToken: packet.sessionToken,
+              analysisTargetId: null,
+            },
+            data: { analysisTargetId: targetId },
+          })
+          if (updated.count === 1) {
+            await prisma.analysisTarget.update({
+              where: { id: targetId },
+              data: { sessionsCollected: { increment: 1 } },
+            })
+            console.log(
+              "[tracking] matched target " + targetId.slice(0, 8) +
+                " for session " + packet.sessionToken.slice(0, 8) +
+                " url=" + dominantUrl,
+            )
+          }
+        }
+      }
+    } catch (err) {
+      console.error(
+        "[tracking] target matching failed:",
+        (err as Error).message,
+      )
+    }
   }
 
   console.log(

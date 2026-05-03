@@ -48,9 +48,36 @@ export async function sendPacket(packet: Packet): Promise<void> {
   }
 }
 
-// Final packet: same path for now. Part 5/8 will switch to navigator.sendBeacon
-// for unload-safe delivery (fetch with keepalive can be aborted by Safari on
-// pagehide).
+// Final packet: navigator.sendBeacon survives page unload across all
+// browsers; fetch with keepalive can be aborted by Safari on pagehide.
+//
+// Beacon body must be a Blob with explicit application/json — the default
+// sendBeacon string ContentType is text/plain;charset=UTF-8 which would
+// trigger CORS preflight (we want simple-request semantics).
 export function sendFinalPacket(packet: Packet): void {
-  void sendPacket(packet)
+  const body = JSON.stringify(packet)
+
+  if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    try {
+      const blob = new Blob([body], { type: 'application/json' })
+      const queued = navigator.sendBeacon(COLLECT_URL, blob)
+      if (queued) return
+      // Beacon refused (>64KB or quota exceeded) — fall through to fetch.
+    } catch {
+      // Old browsers may throw on sendBeacon(Blob) — fall through.
+    }
+  }
+
+  // Fallback: fetch with keepalive. Less reliable than sendBeacon under
+  // unload but better than dropping the packet.
+  void fetch(COLLECT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    credentials: 'omit',
+    keepalive: true,
+  }).catch(() => {
+    // No console.warn here — we're inside pagehide, console may be
+    // closed already.
+  })
 }

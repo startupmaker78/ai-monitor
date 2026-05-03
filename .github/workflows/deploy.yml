@@ -70,7 +70,8 @@ jobs:
                    ANTHROPIC_API_KEY \
                    METRIKA_CLIENT_ID METRIKA_CLIENT_SECRET \
                    YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY \
-                   RESEND_API_KEY IP_HASH_SALT; do
+                   RESEND_API_KEY IP_HASH_SALT \
+                   DEMO_USER_ID; do
             SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},key=$k,environment-variable=$k"
           done
 

@@ -218,8 +218,95 @@ yc lockbox secret add-version <secret-id> \
 
 - `system:allUsers`: `serverless.containers.invoker` — public access
   (контейнер доступен всем без auth-headers).
+- `aje8vk01bgb0ij6rfgan` (runtime-sa): `serverless.containers.invoker` —
+  явный binding для API Gateway (Gateway вызывает контейнер с identity
+  runtime-SA).
 
 **Revisions:** создаются автоматически из GitHub Actions при push в main.
+
+## API Gateway
+
+Yandex Serverless Containers НЕ поддерживают direct custom domain binding.
+Официальный путь — через API Gateway, который работает как HTTPS-прокси
+с SSL termination и custom domain support.
+
+- Name: `webmonitor-staging-gw`
+- ID: `d5dvitusml44us628h4f`
+- Default URL: `https://d5dvitusml44us628h4f.p8361f8z.apigw.yandexcloud.net`
+- Spec: catch-all `/{proxy+}` + `/` → `serverless_containers` integration
+- Backend: `webmonitor-staging` container (`bbarn8gnskqll4cjnkhm`)
+- Backend identity: `webmonitor-runtime-sa` (`aje8vk01bgb0ij6rfgan`)
+
+### Updating Gateway spec
+
+Spec изменения требуют редеплоя:
+
+```
+yc serverless api-gateway update d5dvitusml44us628h4f --spec /path/to/spec.yaml
+```
+
+Spec — runtime артефакт, НЕ хранится в репозитории (избегаем дублирования
+конфигурации). Минимальный template:
+
+```yaml
+openapi: 3.0.0
+info: { title: Webmonitor Staging API Gateway, version: 1.0.0 }
+x-yc-apigateway:
+  cors: { origin: '*', methods: '*', allowedHeaders: '*' }
+paths:
+  /{proxy+}:
+    x-yc-apigateway-any-method:
+      x-yc-apigateway-integration:
+        type: serverless_containers
+        container_id: bbarn8gnskqll4cjnkhm
+        service_account_id: aje8vk01bgb0ij6rfgan
+      parameters:
+        - { in: path, name: proxy, required: false, schema: { default: '-', type: string }, style: simple, explode: false }
+  /:
+    x-yc-apigateway-any-method:
+      x-yc-apigateway-integration:
+        type: serverless_containers
+        container_id: bbarn8gnskqll4cjnkhm
+        service_account_id: aje8vk01bgb0ij6rfgan
+```
+
+## Production Domain
+
+### SSL Certificate
+
+- Name: `webmonitor-staging-ssl`
+- ID: `fpqgofgpnb1m6vf47oen`
+- Domain: `staging.xn--90abjntggcss.xn--p1ai` (staging.вебмонитор.рф)
+- Provider: Let's Encrypt via Yandex Certificate Manager
+- Issuer: `CN=R13,O=Let's Encrypt,C=US`
+- Validity: ~3 months, **auto-renewal managed by Yandex** (Certificate Manager
+  следит за сроком и обновляет за 30 дней до истечения).
+
+### DNS Records (зона webmonitor-rf)
+
+| Name | Type | Value | TTL |
+|------|------|-------|-----|
+| `staging.xn--90abjntggcss.xn--p1ai.` | CNAME | `d5dvitusml44us628h4f.p8361f8z.apigw.yandexcloud.net.` | 300 |
+| `_acme-challenge.staging.xn--90abjntggcss.xn--p1ai.` | CNAME | `fpqgofgpnb1m6vf47oen.cm.yandexcloud.net.` | 300 |
+
+Второй CNAME (acme-challenge) **необходимо оставить** — Let's Encrypt
+будет использовать его для periodic re-validation при auto-renewal cert.
+
+### Domain Binding
+
+- Domain: `staging.xn--90abjntggcss.xn--p1ai`
+- Attached to: API Gateway `d5dvitusml44us628h4f` (`webmonitor-staging-gw`)
+- Domain binding ID: `d5dqpq1f1i8mipnh8n0j`
+- Certificate: `fpqgofgpnb1m6vf47oen`
+
+### Live URLs
+
+- https://staging.xn--90abjntggcss.xn--p1ai/ (Punycode, для DNS / curl)
+- https://staging.вебмонитор.рф/ (Cyrillic IDN, для UI / браузера)
+- https://bbarn8gnskqll4cjnkhm.containers.yandexcloud.net/ (Container default —
+  bypass Gateway, для дебага)
+- https://d5dvitusml44us628h4f.p8361f8z.apigw.yandexcloud.net/ (Gateway default
+  — без custom domain, для дебага)
 
 ## CI/CD Pipeline
 
@@ -271,10 +358,6 @@ eval yc serverless container revision deploy \
   $SECRET_ARGS
 ```
 
-## Что ещё будет создано
-
-- Let's Encrypt certificate для `staging.xn--90abjntggcss.xn--p1ai`
-  и привязка домена к контейнеру (этап 3 коммит 4, после пропагации NS).
 
 ## Gotchas (критичные находки, НЕ В документации Yandex)
 

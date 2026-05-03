@@ -2,7 +2,7 @@
 
 import { randomUUID } from "crypto"
 import { z } from "zod"
-import bcrypt from "bcrypt"
+import bcrypt from "bcryptjs"
 import { Prisma } from "@prisma/client"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"

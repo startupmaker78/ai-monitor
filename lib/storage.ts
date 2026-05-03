@@ -6,15 +6,12 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3"
 
-const REQUIRED_ENV = [
-  "YOS_BUCKET_NAME",
-  "YOS_ENDPOINT",
-  "YOS_REGION",
-  "YOS_ACCESS_KEY_ID",
-  "YOS_SECRET_ACCESS_KEY",
-] as const
-
-type RequiredEnv = (typeof REQUIRED_ENV)[number]
+type RequiredEnv =
+  | "YOS_BUCKET_NAME"
+  | "YOS_ENDPOINT"
+  | "YOS_REGION"
+  | "YOS_ACCESS_KEY_ID"
+  | "YOS_SECRET_ACCESS_KEY"
 
 function readRequiredEnv(name: RequiredEnv): string {
   const value = process.env[name]

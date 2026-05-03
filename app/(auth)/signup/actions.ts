@@ -1,5 +1,6 @@
 "use server"
 
+import { randomUUID } from "crypto"
 import { z } from "zod"
 import bcrypt from "bcrypt"
 import { Prisma } from "@prisma/client"
@@ -52,10 +53,19 @@ export async function signup(
         },
       })
 
-      await tx.ownerProfile.create({
+      const ownerProfile = await tx.ownerProfile.create({
         data: {
           userId: user.id,
           contractorId: null,
+        },
+      })
+
+      await tx.site.create({
+        data: {
+          ownerId: ownerProfile.id,
+          domain: "demo.example.com",
+          trackingToken: randomUUID().replace(/-/g, ""),
+          isDemo: true,
         },
       })
     })

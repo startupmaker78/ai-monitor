@@ -643,3 +643,28 @@ npm run prisma -- migrate diff \
 - PRODUCT.md: переписаны разделы «AI-анализ», «Управление целями анализа», таблица тарифов (убрана колонка «Кулдаун»).
 - ARCHITECTURE.md: обновлены блоки `Subscription`, `AnalysisTarget`, `Session`, таблица «Лимиты по тарифам», секция «Условия запуска нового анализа».
 - Этап 0.c.5: миграция добавит новые поля и enum AnalysisTargetStatus.
+
+---
+
+## 2026-05-03 — eventsCount on Session не идемпотентен на ретрае (acceptable)
+
+**Контекст:** Этап 4, коммит 4/8.
+
+Session.eventsCount инкрементится через Prisma `{ increment }` на каждый
+upsert update. На ретрае одного packetIndex (network race на клиенте,
+fetch не получил ответ — retry) счётчик дублируется.
+
+**Решение:** acceptable на MVP. Не фиксим в этом коммите.
+
+**Почему acceptable:**
+- eventsCount это telemetry-поле, не billing
+- Реальный контент сессии в Object Storage идемпотентен (putJson
+  перезаписывает по ключу sessions/{siteId}/{sessionToken}/{N}.json)
+- AI-анализ читает события из Object Storage, eventsCount не использует
+- UI /dashboard/sessions может показать примерное число — не критично
+
+**Когда фиксим:** одновременно с введением
+Subscription.sessionsCollected к тарифным лимитам (эта модель — на
+будущем этапе после MVP, в roadmap отсутствует). Решение тогда:
+отдельная таблица SessionPacketReceipt с UNIQUE (sessionToken,
+packetIndex), `INSERT ... ON CONFLICT DO NOTHING`.

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { trackingPacketSchema } from "@/lib/tracking-schema"
 import { prisma } from "@/lib/prisma"
+import { putJson } from "@/lib/storage"
+import { hashIp, extractClientIp } from "@/lib/ip-hash"
 
 const MAX_BODY_BYTES = 1024 * 1024
 
@@ -72,8 +74,77 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return corsResponse({ error: "unknown_site" }, { status: 401 })
   }
 
-  // TODO etap 4 part 4/8: write packet to Object Storage and create/update
-  // Session in PostgreSQL. For now we just acknowledge.
+  // Шаг 6: пакет в Object Storage. Ключ:
+  //   sessions/{siteId}/{sessionToken}/{packetIndex}.json
+  // Lifecycle policy на префикс sessions/ удаляет объекты старше 30 дней
+  // (см. ROADMAP этап 0.a). При AI-анализе сессии достаём все пакеты
+  // через listKeys('sessions/{siteId}/{sessionToken}/').
+  const storageKey =
+    `sessions/${site.id}/${packet.sessionToken}/${packet.packetIndex}.json`
+
+  try {
+    await putJson(storageKey, {
+      sessionToken: packet.sessionToken,
+      packetIndex: packet.packetIndex,
+      isFinal: packet.isFinal,
+      pageUrl: packet.pageUrl,
+      userAgent: packet.userAgent,
+      startedAt: packet.startedAt,
+      receivedAt: Date.now(),
+      events: packet.events,
+    })
+  } catch (err) {
+    console.error(
+      "[tracking] Object Storage write failed:",
+      (err as Error).message,
+    )
+    return corsResponse({ error: "storage_failed" }, { status: 503 })
+  }
+
+  // Шаг 7: Session в PostgreSQL. Идемпотентно через upsert по sessionToken
+  // (он @unique). Первый пакет создаёт ряд, последующие инкрементят
+  // eventsCount. isFinal выставляет endedAt.
+  const ipHash = hashIp(extractClientIp(req))
+  const now = new Date()
+  const sessionPrefix = `sessions/${site.id}/${packet.sessionToken}/`
+
+  try {
+    await prisma.session.upsert({
+      where: { sessionToken: packet.sessionToken },
+      create: {
+        siteId: site.id,
+        sessionToken: packet.sessionToken,
+        ipHash,
+        userAgent: packet.userAgent,
+        startedAt: new Date(packet.startedAt),
+        endedAt: packet.isFinal ? now : null,
+        eventsCount: packet.events.length,
+        storageKey: sessionPrefix,
+        // analysisTargetId — null в этом коммите, выставится в 5/8
+      },
+      update: {
+        // TODO: not idempotent on retry. eventsCount can drift if the client
+        // retries the same packetIndex. Acceptable for MVP because eventsCount
+        // is telemetry only — real session content lives in Object Storage
+        // (idempotent: putJson overwrites by key). When we wire
+        // Subscription.sessionsCollected to billing tariff limits, switch to
+        // INSERT ... ON CONFLICT DO NOTHING via separate SessionPacketReceipt
+        // table with UNIQUE (sessionToken, packetIndex).
+        eventsCount: { increment: packet.events.length },
+        ...(packet.isFinal ? { endedAt: now } : {}),
+      },
+    })
+  } catch (err) {
+    console.error(
+      "[tracking] Session upsert failed:",
+      (err as Error).message,
+    )
+    return corsResponse(
+      { error: "session_upsert_failed" },
+      { status: 500 },
+    )
+  }
+
   console.log(
     "[tracking] siteId=" + site.id +
       " session=" + packet.sessionToken.slice(0, 8) +

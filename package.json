@@ -9,6 +9,10 @@
     "lint": "next lint",
     "test:connections": "tsx scripts/test-connections.ts",
     "test:storage": "tsx scripts/test-storage.ts",
+    "build:tracker": "tsx scripts/build-tracker.ts --prod",
+    "build:tracker:dev": "tsx scripts/build-tracker.ts",
+    "build:tracker:watch": "tsx scripts/build-tracker.ts --watch",
+    "test:tracker:pii": "tsx scripts/test-tracker-pii.ts",
     "prisma": "dotenv -e .env.local -- prisma"
   },
   "dependencies": {
@@ -22,6 +26,7 @@
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@rrweb/record": "^2.0.0-alpha.20",
     "@types/bcryptjs": "^2.4.6",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
@@ -39,13 +44,16 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
+    "@types/jsdom": "^28.0.1",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "dotenv-cli": "^11.0.0",
+    "esbuild": "^0.28.0",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
+    "jsdom": "^29.1.1",
     "postcss": "^8",
     "prisma": "^7.8.0",
     "tailwindcss": "^3.4.1",

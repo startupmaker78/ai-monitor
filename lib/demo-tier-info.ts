@@ -1,14 +1,9 @@
 import type { AnalysisTarget } from "@prisma/client"
+import { TIER_CONFIG } from "./tier-limits"
 
-// Виртуальный тариф для демо. В прод-сценарии эти данные придут из
-// модели Subscription (создаётся при оплате — Этап 10).
-export const DEMO_TIER = {
-  name: "Стандартный",
-  targetsLimit: 6,
-  analysesPerMonth: 12,
-  sessionsLimit: 2500,
-  pricePerMonth: 4990,
-} as const
+// Виртуальный тариф для демо. В прод-сценарии данные берутся из
+// Subscription через getEffectiveTier (lib/tier-limits.ts).
+export const DEMO_TIER = TIER_CONFIG.STANDARD
 
 export interface DemoTierUsage {
   targetsUsed: number

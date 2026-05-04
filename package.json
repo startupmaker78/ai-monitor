@@ -13,6 +13,7 @@
     "build:tracker:dev": "tsx scripts/build-tracker.ts",
     "build:tracker:watch": "tsx scripts/build-tracker.ts --watch",
     "test:tracker:pii": "tsx scripts/test-tracker-pii.ts",
+    "test:metrika-parser": "tsx scripts/test-metrika-parser.ts",
     "seed:test-site": "dotenv -e .env.local -- tsx scripts/seed-test-site.ts",
     "prisma": "dotenv -e .env.local -- prisma"
   },

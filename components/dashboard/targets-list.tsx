@@ -1,3 +1,4 @@
+import Link from "next/link"
 import type { AnalysisTarget } from "@prisma/client"
 import type { LucideIcon } from "lucide-react"
 import { Archive, CheckCircle2, Loader2, PlayCircle } from "lucide-react"
@@ -36,9 +37,17 @@ export function TargetsList({ targets }: TargetsListProps) {
   if (targets.length === 0) {
     return (
       <Card>
-        <CardContent className="py-8 text-center text-muted-foreground">
-          У вас пока нет настроенных целей анализа. Добавьте первую цель —
-          обычно это главная страница или /pricing.
+        <CardContent className="py-8 text-center">
+          <p className="text-muted-foreground">
+            У вас пока нет настроенных целей анализа. Добавьте первую цель —
+            обычно это главная страница или /pricing.
+          </p>
+          <Link
+            href="/dashboard/targets"
+            className="mt-4 inline-block text-primary hover:underline"
+          >
+            Перейти к управлению целями →
+          </Link>
         </CardContent>
       </Card>
     )
@@ -47,7 +56,15 @@ export function TargetsList({ targets }: TargetsListProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Цели анализа</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle>Цели анализа</CardTitle>
+          <Link
+            href="/dashboard/targets"
+            className="shrink-0 text-sm text-primary hover:underline"
+          >
+            Управление целями →
+          </Link>
+        </div>
         <CardDescription>
           AI анализирует выбранные вами страницы. Минимум для запуска
           анализа — {MIN_SESSIONS_FOR_ANALYSIS} сессий.

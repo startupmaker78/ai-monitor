@@ -26,12 +26,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Home, PlaySquare, Lightbulb, Settings, LogOut, ChevronUp } from "lucide-react"
+import { Home, PlaySquare, Target, Lightbulb, Settings, LogOut, ChevronUp } from "lucide-react"
 import { logout } from "@/app/(auth)/logout/actions"
 
 const NAV_ITEMS = [
   { title: "Главная", url: "/dashboard", icon: Home },
   { title: "Сессии", url: "/dashboard/sessions", icon: PlaySquare },
+  { title: "Цели", url: "/dashboard/targets", icon: Target },
   { title: "Рекомендации", url: "/dashboard/recommendations", icon: Lightbulb },
   { title: "Настройки", url: "/dashboard/settings", icon: Settings },
 ]

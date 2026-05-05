@@ -786,3 +786,55 @@ avgVisitDurationSeconds), conversions кладёт 0, goals — `{}`.
 **Альтернатива не выбрана:** добавить поле AnalysisTarget.budgetSpent
 Boolean. Требует миграции, дублирует информацию которая уже есть
 в status.
+
+---
+
+## 2026-05-05 — Claude API client: prefill не поддерживается на Opus 4.7
+
+**Контекст:** Этап 6, коммит 2/~6. При первом запуске анализа
+через Claude Opus 4.7 получили HTTP 400: "This model does not
+support assistant message prefill. The conversation must end with
+a user message."
+
+**Что НЕ работает:**
+Стандартный паттерн prefill через `{ role: "assistant", content: "[" }`
+как последнее сообщение для гарантированного JSON-вывода — Opus 4.7
+это не поддерживает. На Sonnet 4.6 / Haiku 4.5 — работает.
+
+**Решение:**
+- Не передаём assistant-prefill в messages
+- Используем defensive parser в lib/analysis-prompt.ts:
+  извлекаем JSON через indexOf("[") / lastIndexOf("]")
+- System prompt чётко требует "СТРОГО JSON-массив без какого-либо
+  текста до или после"
+
+**Результат:** в первом тесте Claude вернул чистый JSON без
+markdown-обёрток, парсер прошёл сразу.
+
+**Когда понадобится:** если меняем модель на Sonnet/Haiku — можно
+добавить prefill обратно для гарантии чистого JSON. Defensive
+parser останется как fallback.
+
+---
+
+## 2026-05-05 — AI-анализ: timeout >= 90 сек требуется на проде
+
+**Контекст:** Этап 6, коммит 2/~6. Тестовый вызов Claude Opus 4.7
+с 4096 max_tokens занял 49.8 секунд. На реальных данных (большее
+количество сессий, более длинный context) может быть 60-90+ сек.
+
+**Следствие:** YC Serverless Container default timeout = 60 сек
+недостаточен. Endpoint /api/analysis/run в коммите 6.4 нужно либо:
+- Увеличить container timeout до 90-120 сек через
+  yc serverless container revision deploy --execution-timeout
+- ИЛИ сделать background processing (юзер видит "обрабатывается",
+  статус AnalysisTarget переходит в ANALYZING, фоновый процесс
+  делает вызов и обновляет в БД когда готов)
+
+**План для 6.4:** background processing — endpoint POST /api/analysis/run
+возвращает 202 Accepted сразу, ставит target в статус ANALYZING,
+фоновая задача (в том же контейнере через setImmediate или Promise)
+делает вызов Claude и пишет результат. UI polls статус.
+
+**Альтернатива не выбрана:** YC Workflows / Async Tasks — overkill
+на MVP. background promise в Node.js + status в БД достаточно.

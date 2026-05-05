@@ -142,26 +142,35 @@ export async function archiveTarget(
   })
   if (!target) return { ok: false, error: "Цель не найдена" }
   if (target.archivedAt) return { ok: false, error: "Цель уже архивирована" }
+  if (target.status === "ANALYZING") {
+    return {
+      ok: false,
+      error:
+        "Нельзя архивировать цель пока идёт AI-анализ. Дождитесь завершения.",
+    }
+  }
 
   const owns = await validateSiteOwnership(target.siteId, session.user.id)
   if (!owns) return { ok: false, error: "Цель не найдена" }
 
   // DECISIONS.md "Бюджеты сессий на цель" правило 5:
-  // - ACTIVE/READY → бюджет возвращается на свободный баланс
-  // - ANALYZING/COMPLETED → бюджет уже потрачен, не возвращается
-  // На MVP Subscription записи нет — sessionsAllocated считается на лету
-  // через активные (archivedAt IS NULL) цели в calculateDemoUsage и
-  // getTargetsPageData. Поэтому при archive достаточно установить
-  // archivedAt: цель исчезает из подсчёта, бюджет освобождается
-  // автоматически. Разница между ACTIVE/READY и ANALYZING/COMPLETED
-  // станет важна когда введём денормализованное поле sessionsAllocated
-  // на Subscription (этап 10) — там нужно будет обновлять его атомарно.
+  // - ACTIVE/READY → бюджет возвращается на свободный баланс,
+  //   ставим status=ARCHIVED (анализ ещё не запускался).
+  // - COMPLETED → бюджет уже потрачен на анализ, не возвращается.
+  //   Сохраняем status=COMPLETED. sessionsAllocated в targets-data.ts
+  //   учитывает COMPLETED как "бюджет навсегда занят" независимо от
+  //   archivedAt.
+  // - ANALYZING → блокируем архивацию выше (анализ идёт сейчас).
+  const newStatus =
+    target.status === "ACTIVE" || target.status === "READY"
+      ? "ARCHIVED"
+      : target.status
 
   await prisma.analysisTarget.update({
     where: { id: target.id },
     data: {
       archivedAt: new Date(),
-      status: "ARCHIVED",
+      status: newStatus,
     },
   })
 

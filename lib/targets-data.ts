@@ -69,7 +69,14 @@ export async function getTargetsPageData(
   const activeTargets = allTargets.filter((t) => t.archivedAt === null)
   const archivedTargets = allTargets.filter((t) => t.archivedAt !== null)
 
-  const sessionsAllocated = activeTargets.reduce(
+  // sessionsAllocated включает (a) все активные цели (archivedAt IS NULL)
+  // и (b) архивированные COMPLETED цели. Бюджет COMPLETED цели считается
+  // потраченным независимо от того архивирована она или нет
+  // (DECISIONS.md правило 5).
+  const allocatingTargets = allTargets.filter(
+    (t) => t.archivedAt === null || t.status === "COMPLETED",
+  )
+  const sessionsAllocated = allocatingTargets.reduce(
     (sum, t) => sum + t.sessionsBudget,
     0,
   )

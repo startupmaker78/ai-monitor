@@ -763,3 +763,26 @@ avgVisitDurationSeconds), conversions кладёт 0, goals — `{}`.
 **Когда фикс:** после фидбека от касдев-юзеров. Если "хочу
 переименовать цель" окажется частым запросом — добавим inline-edit
 для name. sessionsBudget edit — отдельная история.
+
+---
+
+## 2026-05-05 — Hotfix архивации COMPLETED целей
+
+**Контекст:** Этап 6, второй hotfix к коммиту 6.1.
+
+**Баг:** При архивации COMPLETED цели бюджет возвращался на
+свободный баланс. По правилу 5 из "Бюджеты сессий на цель"
+он должен быть зафиксирован как потраченный.
+
+**Решение:**
+- archiveTarget сохраняет status=COMPLETED при архивации COMPLETED
+  цели (вместо перезаписи на ARCHIVED). Status=ARCHIVED ставится
+  только для ACTIVE/READY (анализ ещё не запускался).
+- sessionsAllocated в getTargetsPageData включает все цели где
+  archivedAt IS NULL ИЛИ status === COMPLETED. Это означает:
+  "потрачено навсегда" для COMPLETED.
+- ANALYZING статус заблокирован для архивации (анализ идёт сейчас).
+
+**Альтернатива не выбрана:** добавить поле AnalysisTarget.budgetSpent
+Boolean. Требует миграции, дублирует информацию которая уже есть
+в status.

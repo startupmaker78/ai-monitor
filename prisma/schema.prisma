@@ -165,6 +165,7 @@ model AnalysisTarget {
   name              String?
   sessionsBudget    Int
   sessionsCollected Int                  @default(0)
+  budgetSpent       Boolean              @default(false)
   status            AnalysisTargetStatus @default(ACTIVE)
   archivedAt        DateTime?
   createdAt         DateTime             @default(now())

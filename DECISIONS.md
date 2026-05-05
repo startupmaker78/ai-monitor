@@ -838,3 +838,69 @@ parser останется как fallback.
 
 **Альтернатива не выбрана:** YC Workflows / Async Tasks — overkill
 на MVP. background promise в Node.js + status в БД достаточно.
+
+---
+
+## 2026-05-05 — Hotfix 4: AnalysisTarget.budgetSpent — правильная модель бюджета
+
+**Контекст:** Этап 6, четвёртый hotfix к коммиту 6.1. После
+деплоя hotfix 2 обнаружен бизнес-баг: юзер архивировал цель
+status=ARCHIVED с sessionsCollected=523 — бюджет 600 вернулся
+на свободный баланс. Это эксплойт: можно крутить "анализ →
+архив → ещё анализ" бесконечно за один тариф.
+
+**Корень проблемы:** в hotfix 1-2 мы пытались косвенно определить
+"бюджет потрачен" через комбинацию status и archivedAt. Сложная
+логика, неочевидные edge cases.
+
+**Правильное решение:** явное поле AnalysisTarget.budgetSpent:
+Boolean. Семантика проста — "AI-анализ был запущен и бюджет
+потрачен навсегда".
+
+**Жизненный цикл budgetSpent:**
+- default false (при создании цели)
+- переключается в true при запуске анализа (status: ACTIVE/READY
+  → ANALYZING) — реализуется в коммите 6.4
+- НИКОГДА не снимается обратно
+
+**Логика sessionsAllocated:**
+- Сумма sessionsBudget где (archivedAt IS NULL) ИЛИ (budgetSpent=true)
+- Архивация ACTIVE/READY цели где budgetSpent=false → бюджет
+  освобождается (юзер передумал, не успел запустить анализ)
+- Архивация цели где budgetSpent=true → бюджет остаётся занятым
+  навсегда (анализ уже потрачен)
+
+**Data migration:** UPDATE AnalysisTarget SET budgetSpent=true
+WHERE sessionsCollected > 0. Закрывает баг для существующих
+записей.
+
+**Упрощение:** archiveTarget теперь всегда ставит status=ARCHIVED
+без conditional логики. Семантика чистая — ARCHIVED = "юзер
+удалил цель", budgetSpent = отдельный финансовый флаг.
+
+**TODO для коммита 6.4:** при переходе AnalysisTarget.status
+ACTIVE/READY → ANALYZING — обязательно ставить budgetSpent=true
+в той же транзакции.
+
+**Альтернативы не выбраны:**
+- "Не возвращать бюджет вообще никогда" — нарушает UX, юзер
+  создал цель и не может передумать без потери денег
+- "Расширить status enum: SPENT_ARCHIVED" — дублирует семантику,
+  sql query усложняется
+
+**Урок: data migration через WHERE status IN, не sessionsCollected**
+
+Первая попытка использовала `WHERE sessionsCollected > 0` как
+proxy для "был запущен анализ". Это false proxy: ACTIVE цели
+тоже накапливают sessionsCollected (это их жизненный цикл —
+копят до запуска анализа). Корректная миграция использует
+`WHERE status IN ('ANALYZING', 'COMPLETED')` плюс отдельное
+условие для ARCHIVED с sessionsCollected > 0 (те что были
+COMPLETED до архивации).
+
+Зафиксировано в корректирующей миграции
+20260505224443_fix_budget_spent_for_active_targets.
+
+**Принцип на будущее:** при data migration предпочитать
+условия по explicit status enum, а не по count полям.
+Status — точная семантика, count — derivative.

@@ -237,26 +237,70 @@ function TargetCard({
               {progress}%
             </p>
           </div>
-          {!archived && (
-            <form action={archiveAction}>
-              <input type="hidden" name="targetId" value={target.id} />
-              {!confirmMode ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setConfirmMode(true)
-                    setTimeout(() => setConfirmMode(false), 5000)
-                  }}
-                >
-                  Архивировать
-                </Button>
-              ) : (
-                <ArchiveSubmitButton />
-              )}
-            </form>
-          )}
+          {!archived &&
+            (() => {
+              // Финальная модель (DECISIONS.md hotfix 5):
+              // - COMPLETED → можно архивировать (анализ завершён)
+              // - ACTIVE/READY с collected=0 → можно (юзер передумал)
+              // - ACTIVE/READY с collected>0 → НЕТ, нужен анализ
+              // - ANALYZING → НЕТ, идёт анализ
+              const canArchive =
+                target.status === "COMPLETED" ||
+                ((target.status === "ACTIVE" || target.status === "READY") &&
+                  target.sessionsCollected === 0)
+
+              const archiveBlockedReason =
+                target.status === "ANALYZING"
+                  ? "Анализ идёт"
+                  : target.sessionsCollected > 0
+                    ? "Сначала запустите анализ"
+                    : null
+
+              if (canArchive) {
+                return (
+                  <form action={archiveAction}>
+                    <input
+                      type="hidden"
+                      name="targetId"
+                      value={target.id}
+                    />
+                    {!confirmMode ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setConfirmMode(true)
+                          setTimeout(() => setConfirmMode(false), 5000)
+                        }}
+                      >
+                        Архивировать
+                      </Button>
+                    ) : (
+                      <ArchiveSubmitButton />
+                    )}
+                  </form>
+                )
+              }
+              return (
+                <div className="flex flex-col items-end gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    title={archiveBlockedReason ?? ""}
+                  >
+                    Архивировать
+                  </Button>
+                  {archiveBlockedReason && (
+                    <span className="text-xs text-muted-foreground">
+                      {archiveBlockedReason}
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
         </div>
         {archiveState?.ok === false && archiveState.error && (
           <p className="mt-2 text-sm text-destructive">{archiveState.error}</p>

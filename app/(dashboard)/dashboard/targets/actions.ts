@@ -137,7 +137,7 @@ export async function archiveTarget(
       siteId: true,
       status: true,
       sessionsBudget: true,
-      budgetSpent: true,
+      sessionsCollected: true,
       archivedAt: true,
     },
   })
@@ -150,23 +150,30 @@ export async function archiveTarget(
         "Нельзя архивировать цель пока идёт AI-анализ. Дождитесь завершения.",
     }
   }
+  if (
+    (target.status === "ACTIVE" || target.status === "READY") &&
+    target.sessionsCollected > 0
+  ) {
+    return {
+      ok: false,
+      error:
+        "Сначала запустите анализ собранных сессий. Нельзя архивировать цель с собранными данными до AI-анализа.",
+    }
+  }
 
   const owns = await validateSiteOwnership(target.siteId, session.user.id)
   if (!owns) return { ok: false, error: "Цель не найдена" }
 
-  // DECISIONS.md "2026-05-05 — Hotfix 4: AnalysisTarget.budgetSpent":
-  // Возврат бюджета определяется флагом budgetSpent, а не комбинацией
-  // status/archivedAt. budgetSpent=false → архивация ACTIVE/READY цели
-  // освобождает бюджет автоматически (через filter в targets-data.ts).
-  // budgetSpent=true → бюджет остаётся занятым навсегда (анализ был).
-  // Здесь просто ставим status=ARCHIVED — финансовая семантика отдельно
-  // в budgetSpent.
+  // DECISIONS.md "2026-05-05 — Hotfix 5: финальная модель архивации".
+  // Status НЕ перезаписываем. Если был ACTIVE с collected=0 — остаётся
+  // ACTIVE+archived (юзер передумал до сбора). Если был COMPLETED —
+  // остаётся COMPLETED+archived (анализ был завершён). sessionsAllocated
+  // в targets-data.ts учитывает архивированные через sessionsCollected,
+  // что автоматически возвращает разницу (sessionsBudget - collected)
+  // на свободный баланс.
   await prisma.analysisTarget.update({
     where: { id: target.id },
-    data: {
-      archivedAt: new Date(),
-      status: "ARCHIVED",
-    },
+    data: { archivedAt: new Date() },
   })
 
   revalidatePath("/dashboard/targets")

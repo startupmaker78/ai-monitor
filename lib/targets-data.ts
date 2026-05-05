@@ -9,7 +9,6 @@ export type TargetWithStats = {
   status: string
   sessionsCollected: number
   sessionsBudget: number
-  budgetSpent: boolean
   archivedAt: Date | null
   createdAt: Date
 }
@@ -62,7 +61,6 @@ export async function getTargetsPageData(
       status: true,
       sessionsCollected: true,
       sessionsBudget: true,
-      budgetSpent: true,
       archivedAt: true,
       createdAt: true,
     },
@@ -71,19 +69,19 @@ export async function getTargetsPageData(
   const activeTargets = allTargets.filter((t) => t.archivedAt === null)
   const archivedTargets = allTargets.filter((t) => t.archivedAt !== null)
 
-  // Бюджет занят если: цель активна (archivedAt IS NULL) ИЛИ анализ уже
-  // был запущен (budgetSpent=true). budgetSpent ставится при запуске
-  // анализа (status → ANALYZING) и больше никогда не снимается.
-  // Архивация цели где budgetSpent=true НЕ возвращает бюджет (анализ уже
-  // потрачен). См. DECISIONS.md "2026-05-05 — Hotfix 4: AnalysisTarget
-  // .budgetSpent — правильная модель бюджета".
-  const allocatingTargets = allTargets.filter(
-    (t) => t.archivedAt === null || t.budgetSpent === true,
-  )
-  const sessionsAllocated = allocatingTargets.reduce(
-    (sum, t) => sum + t.sessionsBudget,
-    0,
-  )
+  // sessionsAllocated (DECISIONS.md "2026-05-05 — Hotfix 5"):
+  // - Активные цели (archivedAt IS NULL): полный sessionsBudget
+  //   (резерв на сбор + анализ)
+  // - Архивированные цели: только sessionsCollected
+  //   (что реально использовано — остальное возвращено при архивации;
+  //   архивация ACTIVE/READY с collected>0 запрещена, поэтому архив
+  //   всегда отражает финальное использование).
+  const sessionsAllocated = allTargets.reduce((sum, t) => {
+    if (t.archivedAt === null) {
+      return sum + t.sessionsBudget
+    }
+    return sum + t.sessionsCollected
+  }, 0)
 
   return {
     sites: sites.map((s) => ({

@@ -70,8 +70,10 @@ export function TargetsClient(props: Props) {
           <CardDescription>
             Целей: {props.activeTargets.length} / {props.tier.targetsLimit}
             {" • "}
-            Сессий не аллоцировано: {props.sessionsRemaining} /{" "}
+            Сессий аллоцировано: {props.sessionsAllocated} /{" "}
             {props.tier.sessionsLimit}
+            {" "}
+            (свободно: {props.sessionsRemaining})
           </CardDescription>
         </CardHeader>
       </Card>

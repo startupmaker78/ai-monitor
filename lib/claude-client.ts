@@ -1,7 +1,12 @@
-const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-const CLAUDE_MODEL = "claude-opus-4-7"
-const CLAUDE_API_VERSION = "2023-06-01"
+// Прокси через OpenRouter, потому что api.anthropic.com отвечает 403
+// "Request not allowed" на запросы с РФ-IP (наш staging в YC ru-central1).
+// OpenRouter отдаёт OpenAI-совместимый chat completions API; модель
+// anthropic/claude-opus-4-7 проходит через Amazon Bedrock.
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+const CLAUDE_MODEL = "anthropic/claude-opus-4-7"
 const DEFAULT_MAX_TOKENS = 4096
+const REFERER_URL = "https://staging.xn--80aje0afkgi.xn--p1ai" // Punycode for staging.вебмонитор.рф
+const APP_TITLE = "Webmonitor"
 
 export type ClaudeMessage = {
   role: "user" | "assistant"
@@ -31,36 +36,44 @@ export type ClaudeResult =
       details?: string
     }
 
-// Вызов Anthropic Messages API. Native fetch, не SDK — консистентно
-// с lib/metrika-client.ts.
+// Native fetch, не SDK — консистентно с lib/metrika-client.ts.
 //
 // Не передаём temperature/top_p/top_k: Opus 4.7 их не поддерживает,
-// возвращает 400.
+// возвращает 400. OpenRouter прокидывает параметры в Anthropic как есть,
+// поэтому ограничение действует и здесь.
 export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey || apiKey === "__NOT_SET__") {
     return {
       ok: false,
       error: "auth_failed",
-      details: "ANTHROPIC_API_KEY not set",
+      details: "OPENROUTER_API_KEY not set",
     }
   }
+
+  // Конвертация Anthropic-стиля {system, messages} в OpenAI-стиль:
+  // system становится первым message с role:"system". Если caller уже
+  // сам передал system-сообщение в messages — не дублируем.
+  const oaiMessages: ClaudeMessage[] | Array<{ role: string; content: string }> =
+    req.messages.length > 0 && req.messages[0].role === ("system" as never)
+      ? req.messages
+      : [{ role: "system", content: req.system }, ...req.messages]
 
   const body = {
     model: CLAUDE_MODEL,
     max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
-    system: req.system,
-    messages: req.messages,
+    messages: oaiMessages,
   }
 
   let response: Response
   try {
-    response = await fetch(CLAUDE_API_URL, {
+    response = await fetch(OPENROUTER_API_URL, {
       method: "POST",
       headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": CLAUDE_API_VERSION,
-        "content-type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": REFERER_URL,
+        "X-Title": APP_TITLE,
       },
       body: JSON.stringify(body),
     })
@@ -101,50 +114,62 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
     return { ok: false, error: "invalid_response", details: "not json" }
   }
 
-  return parseClaudeResponse(json)
+  return parseOpenRouterResponse(json)
 }
 
-function parseClaudeResponse(json: unknown): ClaudeResult {
-  // Ответ Anthropic Messages API:
+function parseOpenRouterResponse(json: unknown): ClaudeResult {
+  // Ответ OpenRouter (OpenAI-совместимый):
   // {
-  //   "id": "msg_...",
-  //   "type": "message",
-  //   "role": "assistant",
-  //   "content": [{ "type": "text", "text": "..." }],
-  //   "model": "claude-opus-4-7",
-  //   "stop_reason": "end_turn",
-  //   "usage": { "input_tokens": N, "output_tokens": M }
+  //   "id": "...",
+  //   "object": "chat.completion",
+  //   "created": ...,
+  //   "model": "anthropic/claude-opus-4-7",
+  //   "provider": "Amazon Bedrock",
+  //   "choices": [{
+  //     "index": 0,
+  //     "finish_reason": "stop",
+  //     "message": { "role": "assistant", "content": "..." }
+  //   }],
+  //   "usage": {
+  //     "prompt_tokens": N,
+  //     "completion_tokens": M,
+  //     "total_tokens": N+M
+  //   }
   // }
   if (typeof json !== "object" || json === null) {
     return { ok: false, error: "invalid_response", details: "not object" }
   }
   const obj = json as Record<string, unknown>
 
-  if (!Array.isArray(obj.content) || obj.content.length === 0) {
+  if (!Array.isArray(obj.choices) || obj.choices.length === 0) {
     return {
       ok: false,
       error: "invalid_response",
-      details: "missing content",
+      details: "choices empty or missing content",
     }
   }
-  const firstBlock = obj.content[0] as Record<string, unknown>
-  if (firstBlock.type !== "text" || typeof firstBlock.text !== "string") {
+  const firstChoice = obj.choices[0] as Record<string, unknown>
+  const message = firstChoice.message as Record<string, unknown> | undefined
+  const content = message?.content
+  if (typeof content !== "string" || content.length === 0) {
     return {
       ok: false,
       error: "invalid_response",
-      details: "expected text block",
+      details: "choices empty or missing content",
     }
   }
 
   const usage = obj.usage as Record<string, unknown> | undefined
   return {
     ok: true,
-    text: firstBlock.text,
+    text: content,
     usage: {
       inputTokens:
-        typeof usage?.input_tokens === "number" ? usage.input_tokens : 0,
+        typeof usage?.prompt_tokens === "number" ? usage.prompt_tokens : 0,
       outputTokens:
-        typeof usage?.output_tokens === "number" ? usage.output_tokens : 0,
+        typeof usage?.completion_tokens === "number"
+          ? usage.completion_tokens
+          : 0,
     },
   }
 }

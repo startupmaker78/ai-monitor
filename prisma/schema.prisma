@@ -75,6 +75,14 @@ enum RecommendationStatus {
   REJECTED
 }
 
+enum RecommendationCategory {
+  USABILITY
+  CONTENT
+  MOBILE
+  PERFORMANCE
+  TRUST
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -221,8 +229,14 @@ model Recommendation {
   analysisId      String
   analysis        Analysis               @relation(fields: [analysisId], references: [id], onDelete: Cascade)
   priority        RecommendationPriority
+  category        RecommendationCategory
   title           String
   description     String                 @db.Text
+  problem         String                 @db.Text
+  evidence        String                 @db.Text
+  expectedImpact  String                 @db.Text
+  effort          String
+  lowConfidence   Boolean                @default(false)
   metric          String?
   status          RecommendationStatus   @default(NEW)
   sortOrder       Int

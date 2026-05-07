@@ -48,7 +48,7 @@ export type SessionSummary = {
 }
 
 export type Recommendation = {
-  priority: "CRITICAL" | "IMPORTANT" | "NICE_TO_HAVE"
+  priority: "CRITICAL" | "IMPORTANT" | "GOOD"
   category: "USABILITY" | "CONTENT" | "MOBILE" | "PERFORMANCE" | "TRUST"
   title: string
   problem: string
@@ -80,7 +80,7 @@ const SYSTEM_PROMPT = `Ты — эксперт по UX-аналитике и о�
 Структура каждой рекомендации:
 
 {
-  "priority": "CRITICAL" | "IMPORTANT" | "NICE_TO_HAVE",
+  "priority": "CRITICAL" | "IMPORTANT" | "GOOD",
   "category": "USABILITY" | "CONTENT" | "MOBILE" | "PERFORMANCE" | "TRUST",
   "title": "Краткий заголовок 5-10 слов",
   "problem": "Что не так. 2-4 предложения. Описание проблемы из данных.",
@@ -94,7 +94,7 @@ const SYSTEM_PROMPT = `Ты — эксперт по UX-аналитике и о�
 Приоритизация:
 - CRITICAL: проблема блокирует конверсию у >30% юзеров
 - IMPORTANT: проблема влияет на 10-30%, но не блокирует полностью
-- NICE_TO_HAVE: улучшение UX без явного измеримого влияния
+- GOOD: улучшение UX без явного измеримого влияния
 
 Категории:
 - USABILITY: проблемы с UI, кликабельностью, навигацией, формами
@@ -213,7 +213,7 @@ export function parseRecommendations(
 
     if (
       typeof r.priority !== "string" ||
-      !["CRITICAL", "IMPORTANT", "NICE_TO_HAVE"].includes(r.priority)
+      !["CRITICAL", "IMPORTANT", "GOOD"].includes(r.priority)
     ) {
       errors.push(`Item ${i}: invalid priority`)
       return

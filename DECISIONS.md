@@ -954,3 +954,75 @@ COMPLETED archive → navigation → budgetSpent flag) обнаружен
 Hotfix 1-4 теперь устарели — их логика сложилась в неправильную
 модель и привела к двум разным эксплойтам. Текущая модель
 (hotfix 5) семантически корректна и не требует флагов.
+
+---
+
+## 2026-05-07 — Ротация скомпрометированных секретов
+
+**Контекст:** в чате 03-05 мая засветились PG password, AUTH_SECRET, CRON_SECRET (в выводе `yc serverless trigger get`), YOS_SECRET_ACCESS_KEY.
+
+**Что сделано (07 мая):**
+- PG password ротирован через Console (с третьей попытки — первые две поломались macOS Terminal multi-line paste warning, засунувшим текст ошибки zsh в форму смены пароля).
+- AUTH_SECRET, YOS_ACCESS_KEY_ID, YOS_SECRET_ACCESS_KEY ротированы через новую версию Lockbox e6qc2j55kgf7nhs0eot0.
+- Контейнер передеплоен на ревизию bbad2g1km2ncdqj3gich.
+- Старый YOS access key aje01d61d2pf0v0opb5e удалён.
+- Cron triggers (cleanup, metrika) удалены — старый CRON_SECRET засветился в чате при `yc trigger get` без маскировки.
+
+**Параметры удалённых триггеров (для пересоздания):**
+
+```yaml
+# Триггер 1 — cleanup
+name: webmonitor-cleanup-old-sessions
+cron: "0 1 * * ? *"  # UTC = 04:00 МСК
+container_id: bbarn8gnskqll4cjnkhm
+path: /api/cron/cleanup-old-sessions
+service_account_id: aje8vk01bgb0ij6rfgan  # webmonitor-runtime-sa
+mode: invoke_container_with_retry
+
+# Триггер 2 — metrika
+name: webmonitor-metrika-sync-daily
+cron: "30 21 * * ? *"  # UTC = 00:30 МСК
+container_id: bbarn8gnskqll4cjnkhm
+path: /api/cron/metrika-sync-all
+service_account_id: aje8vk01bgb0ij6rfgan
+mode: invoke_container_with_retry
+```
+
+**TODO:**
+- Сгенерить новый CRON_SECRET, обновить версию в Lockbox
+- Пересоздать оба Timer Triggers с новым CRON_SECRET (параметры выше)
+- Деактивировать НЕ-current версии Lockbox (e6qp2trptjjgnak01go7, e6qdi9fa4lt96312dfl8 и старше). Current версия e6qc2j55kgf7nhs0eot0 деактивации не подлежит (в YC Lockbox current нельзя деактивировать).
+- Очистить `~/.zsh_history` И `~/.zsh_sessions/` от засветившихся команд
+
+**Уроки на будущее:**
+- macOS Terminal "Multi-line paste warning": жмём "Paste as one line" для одиночных значений (паролей)
+- Через UI Console безопаснее чем через CLI для пользователя-не-разработчика — меньше paste-проблем
+- При смене пароля БД ВСЕГДА проверять "Посмотреть пароль" в YC Console сразу после сохранения формы
+- При запросе `yc trigger get` — payload в выводе содержит cron secret в plaintext; маскировать перед отправкой куда-либо
+- При генерации паролей через openssl — сразу копировать в безопасное хранилище ДО любых операций в чате
+
+## 2026-05-07 — Архитектура AI-анализа: синхронный вызов с timeout 600 сек
+
+**Решение:** endpoint `/api/analysis/run` работает синхронно. Container execution timeout увеличиваем до 600 секунд.
+
+**Альтернативы рассмотрели:**
+- YC Async Container Invocation (preview): отклонено — preview-статус, заголовок `X-Ycf-Container-Integration-Type` ставится на стороне клиента, утечка инфра-детали в код фронта.
+- Долгоживущие контейнеры: отклонено — overkill, постоянные ресурсы для 1-2 анализов в день.
+- BullMQ + Redis worker: после MVP.
+
+**Поведение:**
+- Юзер жмёт «Запустить анализ» → POST `/api/analysis/run`
+- Endpoint в одной транзакции: создаёт Analysis(status=PENDING), ставит AnalysisTarget.status=ANALYZING + budgetSpent=true
+- Endpoint вызывает Claude API (49-90 сек), парсит JSON, пишет Recommendation[] в БД, переводит Analysis.status=DONE
+- Endpoint возвращает 200 + список recommendations
+- Фронт показывает прогресс-бар «идёт анализ ~1 минута, не закрывайте вкладку»
+
+**Риски и mitigations:**
+- Юзер закрыл вкладку: Analysis застрянет в RUNNING. Cron-задача (после MVP) переведёт в FAILED через 10 минут.
+- Claude API упал: catch → Analysis.status=FAILED, budgetSpent остаётся true (защита от абьюза, см. hotfix 5).
+- Timeout контейнера: 600 секунд достаточно для текущей модели (Opus 4.7, ~50 сек на 15 mock сессий).
+
+**Когда пересмотреть:**
+- При >5 анализов в день у активного клиента (UX страдает)
+- При появлении кейса «юзер должен иметь возможность закрыть вкладку и вернуться позже»
+- Тогда переход на BullMQ + Redis worker

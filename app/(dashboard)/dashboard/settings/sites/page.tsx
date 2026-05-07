@@ -16,8 +16,8 @@ export default async function SitesPage() {
   if (!op) redirect("/login")
 
   const sites = await prisma.site.findMany({
-    where: { ownerId: op.id },
-    orderBy: [{ isDemo: "desc" }, { createdAt: "desc" }],
+    where: { ownerId: op.id, isDemo: false },
+    orderBy: { createdAt: "desc" },
     select: {
       id: true,
       domain: true,

@@ -102,9 +102,11 @@ export function SitesClient({ initialSites }: Props) {
     }
   }
 
-  const realSites = initialSites.filter((s) => !s.isDemo)
+  // Defensive filter: демо-сайтов больше не должно быть (cleanup в этом
+  // же коммите), но если что-то останется — не рендерим.
+  const visibleSites = initialSites.filter((s) => !s.isDemo)
   const showEmptyHint =
-    realSites.length === 0 && !domain && !name && !creating
+    visibleSites.length === 0 && !domain && !name && !creating
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -176,7 +178,7 @@ export function SitesClient({ initialSites }: Props) {
       )}
 
       <div className="space-y-3">
-        {initialSites.map((site) => (
+        {visibleSites.map((site) => (
           <SiteCard
             key={site.id}
             site={site}
@@ -235,28 +237,25 @@ function SiteCard({
 
         <div className="space-y-2">
           <p className="text-sm font-medium">Код для вставки на сайт</p>
-          <div className="relative">
-            <pre className="overflow-x-auto rounded-md bg-muted p-3 pr-32 text-xs">
-              <code>{snippet}</code>
-            </pre>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onCopy}
-              className="absolute right-2 top-2"
-            >
-              {copied ? (
-                <>
-                  <Check className="mr-1 h-3 w-3" /> Скопировано
-                </>
-              ) : (
-                <>
-                  <Copy className="mr-1 h-3 w-3" /> Копировать
-                </>
-              )}
-            </Button>
-          </div>
+          <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
+            <code>{snippet}</code>
+          </pre>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onCopy}
+          >
+            {copied ? (
+              <>
+                <Check className="mr-1 h-3 w-3" /> Скопировано
+              </>
+            ) : (
+              <>
+                <Copy className="mr-1 h-3 w-3" /> Копировать
+              </>
+            )}
+          </Button>
           <p className="text-xs text-muted-foreground">
             Вставьте этот код в раздел «Шапка» или «Подвал» настроек
             сайта. Для Tilda: Настройки сайта → Дополнительно → HTML код

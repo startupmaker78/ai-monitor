@@ -16,6 +16,7 @@
     "test:metrika-parser": "tsx scripts/test-metrika-parser.ts",
     "test:analysis-prompt": "dotenv -e .env.local -- tsx scripts/test-analysis-prompt.ts",
     "seed:test-site": "dotenv -e .env.local -- tsx scripts/seed-test-site.ts",
+    "cleanup:demo-data": "dotenv -e .env.local -- tsx scripts/cleanup-demo-data.ts",
     "prisma": "dotenv -e .env.local -- prisma"
   },
   "dependencies": {

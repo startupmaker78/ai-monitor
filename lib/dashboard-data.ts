@@ -6,6 +6,9 @@ export async function getDashboardData(userId: string) {
     where: { userId },
     include: {
       sites: {
+        // Defensive фильтр isDemo=false: после cleanup demo-Sites не должно
+        // быть, но если что-то осталось — не показываем на дашборде.
+        where: { isDemo: false },
         orderBy: { createdAt: "asc" },
         take: 1,
       },

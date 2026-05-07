@@ -83,7 +83,7 @@ jobs:
             --memory 512MB \
             --core-fraction 100 \
             --concurrency 8 \
-            --execution-timeout 30s \
+            --execution-timeout 600s \
             --service-account-id ${{ env.YC_RUNTIME_SA_ID }} \
             $SECRET_ARGS
 

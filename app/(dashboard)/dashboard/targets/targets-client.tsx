@@ -2,6 +2,7 @@
 
 import { useFormState, useFormStatus } from "react-dom"
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -209,6 +210,9 @@ function TargetCard({
     initialState,
   )
   const [confirmMode, setConfirmMode] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null)
+  const router = useRouter()
 
   const progress =
     target.sessionsBudget > 0
@@ -217,6 +221,38 @@ function TargetCard({
           Math.round((target.sessionsCollected / target.sessionsBudget) * 100),
         )
       : 0
+
+  async function handleAnalyze() {
+    setAnalyzing(true)
+    setAnalyzeError(null)
+    try {
+      const res = await fetch("/api/analysis/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: target.id }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        message?: string
+        error?: string
+      }
+      if (!res.ok) {
+        setAnalyzeError(
+          data.message ?? `Ошибка сервера (${res.status}). Попробуйте ещё раз.`,
+        )
+        setAnalyzing(false)
+        return
+      }
+      // Успех: рефрешим страницу — server component перечитает данные,
+      // карточка перерисуется со статусом COMPLETED.
+      router.refresh()
+      setAnalyzing(false)
+    } catch (err) {
+      setAnalyzeError(
+        err instanceof Error ? err.message : "Ошибка сети.",
+      )
+      setAnalyzing(false)
+    }
+  }
 
   return (
     <Card className={archived ? "opacity-60" : ""}>
@@ -237,75 +273,149 @@ function TargetCard({
               {progress}%
             </p>
           </div>
-          {!archived &&
-            (() => {
-              // Финальная модель (DECISIONS.md hotfix 5):
-              // - COMPLETED → можно архивировать (анализ завершён)
-              // - ACTIVE/READY с collected=0 → можно (юзер передумал)
-              // - ACTIVE/READY с collected>0 → НЕТ, нужен анализ
-              // - ANALYZING → НЕТ, идёт анализ
-              const canArchive =
-                target.status === "COMPLETED" ||
-                ((target.status === "ACTIVE" || target.status === "READY") &&
-                  target.sessionsCollected === 0)
-
-              const archiveBlockedReason =
-                target.status === "ANALYZING"
-                  ? "Анализ идёт"
-                  : target.sessionsCollected > 0
-                    ? "Сначала запустите анализ"
-                    : null
-
-              if (canArchive) {
-                return (
-                  <form action={archiveAction}>
-                    <input
-                      type="hidden"
-                      name="targetId"
-                      value={target.id}
-                    />
-                    {!confirmMode ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setConfirmMode(true)
-                          setTimeout(() => setConfirmMode(false), 5000)
-                        }}
-                      >
-                        Архивировать
-                      </Button>
-                    ) : (
-                      <ArchiveSubmitButton />
-                    )}
-                  </form>
-                )
-              }
-              return (
-                <div className="flex flex-col items-end gap-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled
-                    title={archiveBlockedReason ?? ""}
-                  >
-                    Архивировать
-                  </Button>
-                  {archiveBlockedReason && (
-                    <span className="text-xs text-muted-foreground">
-                      {archiveBlockedReason}
-                    </span>
-                  )}
-                </div>
-              )
-            })()}
+          {!archived && (
+            <div className="flex flex-col items-end gap-2">
+              <AnalyzeButton
+                target={target}
+                analyzing={analyzing}
+                onAnalyze={handleAnalyze}
+              />
+              <ArchiveControl
+                target={target}
+                confirmMode={confirmMode}
+                setConfirmMode={setConfirmMode}
+                archiveAction={archiveAction}
+              />
+            </div>
+          )}
         </div>
+        {!archived && analyzing && (
+          <p className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
+            Идёт анализ, обычно ~1 минута. Не закрывайте вкладку.
+          </p>
+        )}
+        {analyzeError && (
+          <p className="mt-2 text-sm text-destructive">{analyzeError}</p>
+        )}
         {archiveState?.ok === false && archiveState.error && (
           <p className="mt-2 text-sm text-destructive">{archiveState.error}</p>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function AnalyzeButton({
+  target,
+  analyzing,
+  onAnalyze,
+}: {
+  target: TargetWithStats
+  analyzing: boolean
+  onAnalyze: () => void
+}) {
+  if (target.status === "ACTIVE") {
+    return (
+      <Button type="button" size="sm" disabled>
+        {`Накоплено ${target.sessionsCollected}/${target.sessionsBudget} (нужно ≥100)`}
+      </Button>
+    )
+  }
+  if (target.status === "READY") {
+    return (
+      <Button
+        type="button"
+        size="sm"
+        disabled={analyzing}
+        onClick={onAnalyze}
+      >
+        {analyzing ? "Идёт анализ ~1 минута…" : "Запустить анализ"}
+      </Button>
+    )
+  }
+  if (target.status === "ANALYZING") {
+    return (
+      <Button type="button" size="sm" disabled>
+        Анализ идёт…
+      </Button>
+    )
+  }
+  if (target.status === "COMPLETED") {
+    return (
+      <Button type="button" size="sm" disabled>
+        Завершён в этом периоде
+      </Button>
+    )
+  }
+  return null
+}
+
+function ArchiveControl({
+  target,
+  confirmMode,
+  setConfirmMode,
+  archiveAction,
+}: {
+  target: TargetWithStats
+  confirmMode: boolean
+  setConfirmMode: (v: boolean) => void
+  archiveAction: (formData: FormData) => void
+}) {
+  // Финальная модель (DECISIONS.md hotfix 5):
+  // - COMPLETED → можно архивировать (анализ завершён)
+  // - ACTIVE/READY с collected=0 → можно (юзер передумал)
+  // - ACTIVE/READY с collected>0 → НЕТ, нужен анализ
+  // - ANALYZING → НЕТ, идёт анализ
+  const canArchive =
+    target.status === "COMPLETED" ||
+    ((target.status === "ACTIVE" || target.status === "READY") &&
+      target.sessionsCollected === 0)
+
+  const archiveBlockedReason =
+    target.status === "ANALYZING"
+      ? "Анализ идёт"
+      : target.sessionsCollected > 0
+        ? "Сначала запустите анализ"
+        : null
+
+  if (canArchive) {
+    return (
+      <form action={archiveAction}>
+        <input type="hidden" name="targetId" value={target.id} />
+        {!confirmMode ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setConfirmMode(true)
+              setTimeout(() => setConfirmMode(false), 5000)
+            }}
+          >
+            Архивировать
+          </Button>
+        ) : (
+          <ArchiveSubmitButton />
+        )}
+      </form>
+    )
+  }
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled
+        title={archiveBlockedReason ?? ""}
+      >
+        Архивировать
+      </Button>
+      {archiveBlockedReason && (
+        <span className="text-xs text-muted-foreground">
+          {archiveBlockedReason}
+        </span>
+      )}
+    </div>
   )
 }

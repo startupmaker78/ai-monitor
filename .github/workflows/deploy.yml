@@ -67,13 +67,13 @@ jobs:
           for k in DATABASE_URL AUTH_SECRET AUTH_URL \
                    YOS_BUCKET_NAME YOS_ENDPOINT YOS_REGION \
                    YOS_ACCESS_KEY_ID YOS_SECRET_ACCESS_KEY YOS_PUBLIC_URL \
-                   ANTHROPIC_API_KEY \
+                   ANTHROPIC_API_KEY OPENROUTER_API_KEY \
                    METRIKA_CLIENT_ID METRIKA_CLIENT_SECRET \
                    YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY \
                    RESEND_API_KEY IP_HASH_SALT \
                    CRON_SECRET \
                    DEMO_USER_ID; do
-            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},key=$k,environment-variable=$k"
+            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},version-id=e6ql2675376nvf6hepbe,key=$k,environment-variable=$k"
           done
 
           eval yc serverless container revision deploy \

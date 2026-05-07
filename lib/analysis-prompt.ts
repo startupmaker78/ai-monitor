@@ -45,6 +45,9 @@ export type SessionSummary = {
   deadClicks: number
   exitElement: string | null
   errors: string[]
+  // true — юзер не закрыл вкладку штатно (force-close или краш),
+  // endedAt вычислен по последнему event.timestamp.
+  incomplete: boolean
 }
 
 export type Recommendation = {
@@ -106,7 +109,9 @@ const SYSTEM_PROMPT = `Ты — эксперт по UX-аналитике и о�
 Effort:
 - LOW: <1 час работы (изменить текст, поменять цвет, добавить иконку)
 - MEDIUM: 1-4 часа (переработать секцию, добавить блок, изменить layout)
-- HIGH: 4+ часов (редизайн страницы, новая функциональность)`
+- HIGH: 4+ часов (редизайн страницы, новая функциональность)
+
+Поле incomplete в каждой сессии: true означает что юзер не закрыл вкладку штатно (force-close или краш), endedAt вычислен по последнему event — продолжительность таких сессий и поведение в них трактовать осторожно.`
 
 export function buildAnalysisPrompt(input: AnalysisInput): {
   system: string

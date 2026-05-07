@@ -29,6 +29,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "browser-back",
     errors: [],
+    incomplete: false,
   },
   {
     duration: 11,
@@ -41,6 +42,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "browser-back",
     errors: [],
+    incomplete: false,
   },
   {
     duration: 13,
@@ -55,6 +57,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "browser-back",
     errors: [],
+    incomplete: false,
   },
 
   // 4-5: rage clicks на disabled "Оформить заказ" (mobile)
@@ -77,6 +80,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "button.cta-order[disabled]",
     errors: [],
+    incomplete: false,
   },
   {
     duration: 48,
@@ -95,6 +99,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "button.cta-order[disabled]",
     errors: [],
+    incomplete: false,
   },
 
   // 6: dead clicks на картинку-баннер (mobile)
@@ -109,6 +114,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 3,
     exitElement: "img.feature-illustration",
     errors: [],
+    incomplete: false,
   },
 
   // 7-8: брошенная форма обратной связи (mobile)
@@ -129,6 +135,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "form.contact-form",
     errors: [],
+    incomplete: false,
   },
   {
     duration: 78,
@@ -150,6 +157,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "form.contact-form",
     errors: [],
+    incomplete: false,
   },
 
   // 9: mobile dead click на инфографику
@@ -164,6 +172,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 2,
     exitElement: "img.pricing-comparison-chart",
     errors: [],
+    incomplete: false,
   },
 
   // 10-11: desktop, длинное чтение без клика на CTA
@@ -183,6 +192,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "footer.site-footer",
     errors: [],
+    incomplete: false,
   },
   {
     duration: 148,
@@ -197,6 +207,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "tab-close",
     errors: [],
+    incomplete: false,
   },
 
   // 12-13: desktop, брошенная форма / rage click
@@ -217,6 +228,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "form.contact-form",
     errors: [],
+    incomplete: false,
   },
   {
     duration: 56,
@@ -237,6 +249,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "button.cta-order[disabled]",
     errors: [],
+    incomplete: false,
   },
 
   // 14: desktop, dead click + abandon
@@ -253,6 +266,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 2,
     exitElement: "form.contact-form",
     errors: [],
+    incomplete: false,
   },
 
   // 15: tablet
@@ -272,6 +286,7 @@ const SESSIONS: SessionSummary[] = [
     deadClicks: 0,
     exitElement: "form.contact-form",
     errors: [],
+    incomplete: false,
   },
 ]
 

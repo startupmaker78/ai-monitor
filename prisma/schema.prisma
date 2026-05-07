@@ -131,6 +131,7 @@ model Site {
   ownerId          String
   owner            OwnerProfile @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   domain           String
+  name             String?
   trackingToken    String       @unique
   isDemo           Boolean      @default(false)
   metrikaCounterId String?

@@ -3,7 +3,7 @@ import { z } from "zod"
 import { randomUUID } from "crypto"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { normalizeDomain } from "@/lib/site-utils"
+import { normalizeDomain, validateDomain } from "@/lib/site-utils"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -80,6 +80,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!normalizedDomain) {
     return NextResponse.json(
       { error: "bad_request", message: "Введите корректный домен" },
+      { status: 400 },
+    )
+  }
+  try {
+    validateDomain(normalizedDomain)
+  } catch (e) {
+    return NextResponse.json(
+      { error: "bad_request", message: (e as Error).message },
       { status: 400 },
     )
   }

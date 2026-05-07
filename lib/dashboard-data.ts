@@ -123,6 +123,10 @@ export async function getDashboardData(userId: string) {
 
   return {
     site,
+    // hasMetrics=false означает что Site есть, но MetricsSnapshot ещё не
+    // накопились — Метрика не подключена либо первый sync не сработал.
+    // Frontend показывает банер «Ждём первых данных» сверху дашборда.
+    hasMetrics: allSnapshots.length > 0,
     kpi: {
       totalVisits7d,
       avgConversionRate,

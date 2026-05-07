@@ -165,6 +165,13 @@ export async function runAnalysis(
   // 12. Ошибки Claude.
   if (!claudeResult.ok) {
     if (claudeResult.error === "invalid_response") {
+      console.error("[analysis-runner] Claude returned invalid response", {
+        analysisId: analysis.id,
+        targetId,
+        errorType: claudeResult.error,
+        errorCategory: "claude_invalid",
+        details: claudeResult.details,
+      })
       // Запрос дошёл, токены потрачены, но ответ нечитаемый — бюджет цели
       // считаем потраченным.
       await markFailed(analysis.id, targetId, "COMPLETED")
@@ -177,6 +184,13 @@ export async function runAnalysis(
       }
     }
     // network_error | rate_limit | auth_failed | api_error → ретрай возможен.
+    console.error("[analysis-runner] Claude API failed", {
+      analysisId: analysis.id,
+      targetId,
+      errorType: claudeResult.error,
+      errorCategory: "claude_retriable",
+      details: claudeResult.details,
+    })
     await markFailed(analysis.id, targetId, "READY")
     return {
       ok: false,
@@ -189,6 +203,20 @@ export async function runAnalysis(
   // 13. Парсинг.
   const parsed = parseRecommendations(claudeResult.text)
   if (!parsed.ok || parsed.recommendations.length === 0) {
+    // claudeResult.text содержит ответ Claude — может включать
+    // рекомендации с PII при реальных данных. Логируем только длину
+    // и первые 200 символов для диагностики формата.
+    console.error("[analysis-runner] parseRecommendations failed", {
+      analysisId: analysis.id,
+      targetId,
+      errorCategory: "claude_invalid",
+      parseError: parsed.ok ? "zero_valid_recommendations" : parsed.error,
+      validCount: parsed.ok ? parsed.recommendations.length : 0,
+      textLength: claudeResult.text.length,
+      textPreview: claudeResult.text.substring(0, 200),
+      tokensUsed:
+        claudeResult.usage.inputTokens + claudeResult.usage.outputTokens,
+    })
     await markFailed(analysis.id, targetId, "COMPLETED")
     return {
       ok: false,

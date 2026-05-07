@@ -65,10 +65,17 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
       body: JSON.stringify(body),
     })
   } catch (err) {
+    const e = err as Error & { code?: string; cause?: unknown }
+    console.error("[claude-client] fetch failed", {
+      errorName: e?.name,
+      errorMessage: e?.message,
+      errorCode: e?.code,
+      cause: e?.cause,
+    })
     return {
       ok: false,
       error: "network_error",
-      details: (err as Error).message,
+      details: e?.message,
     }
   }
 

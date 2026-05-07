@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { BarChart3, User } from "lucide-react"
+import { BarChart3, Globe, User } from "lucide-react"
 import {
   Card,
   CardDescription,
@@ -17,6 +17,12 @@ const SETTINGS_SECTIONS = [
     description: "Имя, пароль, email",
     href: "/dashboard/settings/profile",
     icon: User,
+  },
+  {
+    title: "Сайты",
+    description: "Подключение, snippets, управление",
+    href: "/dashboard/settings/sites",
+    icon: Globe,
   },
   {
     title: "Яндекс.Метрика",

@@ -1026,3 +1026,41 @@ mode: invoke_container_with_retry
 - При >5 анализов в день у активного клиента (UX страдает)
 - При появлении кейса «юзер должен иметь возможность закрыть вкладку и вернуться позже»
 - Тогда переход на BullMQ + Redis worker
+
+---
+
+## 2026-05-07 (вечер) — Миграция Claude API на OpenRouter из-за geo-блока РФ
+
+**Контекст:** при первом UI smoke test endpoint /api/analysis/run на staging вернул claude_retriable. Логи показали: `HTTP 403: {"type":"forbidden","message":"Request not allowed"}` от api.anthropic.com. Anthropic блокирует API-запросы с РФ-IP (YC контейнер в DC zone ru-central1). Локально работает потому что разработка идёт с не-РФ IP.
+
+**Решение:** проксируем Claude API через OpenRouter.ai. Их `claude-opus-4-7` идёт через AWS Bedcock и доступен с любого IP. API формат — OpenAI Chat Completions (не Anthropic Messages API), поэтому потребовалась адаптация `lib/claude-client.ts`.
+
+**Альтернативы рассмотрели:**
+- Self-hosted proxy (Hetzner/Cloudflare Worker): отклонено — 2-4 часа работы vs 30 минут с OpenRouter, для MVP без реальных клиентов overkill.
+- Переход на YandexGPT: отклонено — упадёт качество анализа сложных rrweb-кейсов.
+- Перенос всего бэкенда из YC в EU клауд: отклонено — слишком большая миграция (DB, secrets, deploys).
+
+**Что сделано:**
+- Создан OpenRouter аккаунт, пополнен баланс $5, выписан API key с credit limit $10.
+- `lib/claude-client.ts` переписан под OpenAI-формат: URL `https://openrouter.ai/api/v1/chat/completions`, header `Authorization: Bearer ${OPENROUTER_API_KEY}` + `HTTP-Referer` (Punycode `staging.xn--80aje0afkgi.xn--p1ai`) + `X-Title: Webmonitor`. Модель `anthropic/claude-opus-4-7`. Body: system как первое message с role:"system". Response: `choices[0].message.content` + `usage.prompt_tokens/completion_tokens`.
+- Public API `callClaude` / тип `ClaudeResult` не тронуты — `analysis-runner.ts` работает без правок.
+- В Lockbox создана новая версия `e6ql2675376nvf6hepbe` (на основе `e6qc2j55kgf7nhs0eot0`) с добавленным ключом `OPENROUTER_API_KEY`.
+- В `.github/workflows/deploy.yml` добавлен явный `version-id=e6ql2675376nvf6hepbe` в шаблон `--secret` (раньше был автоподхват current). Ключ `OPENROUTER_API_KEY` добавлен в bash-loop генерации secret args.
+
+**Стоимость:** OpenRouter тарифицирует identical к Anthropic ($15/M input + $75/M output для Opus 4.7), плюс ~5% markup. Один анализ ≈ $0.32-0.34. На staging тестовый прогон: 39.5 сек, $0.33, 8 рекомендаций — качество идентично прямому Anthropic.
+
+**Безопасность:**
+- OpenRouter видит payloads запросов и ответов в plain text. Для staging без реальных клиентов приемлемо. Перед запуском с реальными клиентами решить: оставаться на OpenRouter (есть `no-logging` mode) или мигрировать на self-hosted proxy.
+- API key с credit limit $10 — при утечке атакующий потратит максимум $10 (vs unlimited у Anthropic key).
+
+**TODO:**
+- Добавить `OPENROUTER_API_KEY` в `.env.example` (уже сделано в коммите `d54b09d`).
+- При следующей ротации Lockbox вспомнить что в workflow закреплён конкретный version-id и обновить.
+- Перед production: пересмотреть выбор `OpenRouter vs self-hosted proxy` через призму compliance.
+- `ANTHROPIC_API_KEY` в Lockbox оставлен на случай fallback, но кодом не используется.
+
+**Уроки на будущее:**
+- При выборе клауд-провайдера для AI-зависимого продукта проверять supported regions всех зависимостей. Anthropic supported countries: https://www.anthropic.com/supported-countries — Россия не в списке с июля 2024.
+- Локальная разработка с не-РФ IP маскирует geo-проблемы. Smoke test на staging с РФ-IP — обязательная стадия.
+- При миграции внешнего API лучше всё переписывать в одном файле клиента (claude-client.ts) и не трогать остальной код. Тип ClaudeResult сохранён — analysis-runner и тесты работают без правок.
+- `console.error` со структурированным контекстом (errorType, details, cause) в client библиотеках критичны для диагностики на удалённых средах. Без них geo-block искал бы как сетевая проблема ещё час.

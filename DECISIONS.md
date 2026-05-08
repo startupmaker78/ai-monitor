@@ -1125,3 +1125,22 @@ AnalysisTarget URLs владельца.
 - Hard limit 30k events per session (drop overflow) — защита от 
   пограничных кейсов
 - Замер pre-processor производительности после реализации
+
+---
+
+## 2026-05-08 (полдень) — Debug session: ложная тревога про cron-trigger + learnings по yc CLI
+
+**Контекст:** YC Timer Trigger `finalize-stale-sessions` (id `a1ssv60ll57u264na868`) казался сломанным после деплоя 09:22 UTC ревизии `f758ca4`. Симптом: `yc logging read --since 4h --limit 5000` показывал newest=`09:21:00 UTC` при текущем 09:44 UTC, что выглядело как «триггер не тикает 23 минуты». При сужении окна до `--since 1h` + `--filter 'message:"cron-finalize"'` нашлись тики `09:31`, `09:46` — триггер работал штатно. Триггер не пересоздавал, конфигурацию не менял.
+
+**Learnings (yc CLI):**
+
+1. **`yc logging read --since X --limit N` обрезает по limit *старейших* записей в окне.** Если за окно >N events — `--limit 1000` или даже `--limit 5000` забивается старыми, newest в выдаче выглядит замороженным. На staging при активном трекере (300+ events/min от nolim.cc) `--since 30m` забивает любой реалистичный лимит.
+   **Как правильно**: узкое окно (`--since 1m`/`5m`/`30m`) + server-side `--filter` (например `--filter 'message:"cron-finalize"'`) + `--resource-types serverless.container`. Default sort ascending — `--limit 1` даёт **самую старую** запись окна, не самую свежую.
+
+2. **YC Timer Trigger cron-expression `*/15 * * * ? *` тикает каждые 15 минут от `created_at` триггера**, не от ровных минут :00/:15/:30/:45 часа. Триггер созданный в `08:43:56 UTC` даёт тики на 08:46, 09:01, 09:16, 09:31, 09:46 (initial offset ~3 мин + каждые 15). При создании нового триггера сначала проверить фактическое расписание через первые 2-3 тика, не предполагать.
+
+3. **`yc config list` всегда выводит IAM-token в первой строке** (zero-effort leak в transcripts/чаты). Использовать `yc config get <field>` (например `yc config get folder-id`) либо фильтровать `yc config list 2>&1 | grep -v '^token:'`. См. также TODO.md → Безопасность 2026-05-08.
+
+4. **`yc serverless trigger get` всегда выводит CRON_SECRET в `payload`** (plaintext). Маскировать через `--format json | jq 'del(.timer.invoke_container_with_retry.payload, .rule.timer.invoke_container_with_retry.payload)'` (поле дублируется в `.timer` и `.rule.timer`).
+
+**Урок на архитектурном уровне:** debug staging-инфраструктуры через CLI без structured-observability (Grafana/dashboard для invocations + error rate триггеров) приводит к ложным тревогам и трате времени на расследование. После MVP — поднять Yandex Monitoring dashboard с метриками триггеров (`trigger.invocations`, `trigger.errors`) чтобы за один взгляд видеть, тикает ли cron.

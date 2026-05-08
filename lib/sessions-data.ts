@@ -53,3 +53,53 @@ export async function getSessionsForUser(
 
   return { sites, sessions, selectedSiteId: validatedSiteId }
 }
+
+export type OwnedSession = {
+  id: string
+  sessionToken: string
+  siteId: string
+  storageKey: string | null
+  startedAt: Date
+  endedAt: Date | null
+  eventsCount: number
+  ipHash: string
+  site: { domain: string; isDemo: boolean }
+  analysisTarget: { id: string; url: string } | null
+}
+
+// Загружает Session по id и проверяет, что она принадлежит юзеру через
+// цепочку User → OwnerProfile → Site → Session. Возвращает null если
+// сессия не найдена ИЛИ принадлежит другому юзеру (не палим
+// существование чужих ID).
+export async function loadOwnedSession(
+  sessionId: string,
+  userId: string,
+): Promise<OwnedSession | null> {
+  const op = await prisma.ownerProfile.findUnique({
+    where: { userId },
+    select: { id: true },
+  })
+  if (!op) return null
+
+  const found = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: {
+      site: { select: { ownerId: true, domain: true, isDemo: true } },
+      analysisTarget: { select: { id: true, url: true } },
+    },
+  })
+  if (!found || found.site.ownerId !== op.id) return null
+
+  return {
+    id: found.id,
+    sessionToken: found.sessionToken,
+    siteId: found.siteId,
+    storageKey: found.storageKey,
+    startedAt: found.startedAt,
+    endedAt: found.endedAt,
+    eventsCount: found.eventsCount,
+    ipHash: found.ipHash,
+    site: { domain: found.site.domain, isDemo: found.site.isDemo },
+    analysisTarget: found.analysisTarget,
+  }
+}

@@ -96,14 +96,12 @@ export function SessionsTable({ sessions, selectedSiteId, currentSort }: Props) 
                 </span>
               </td>
               <td className="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  disabled
-                  title="Воспроизведение скоро"
-                  className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs text-muted-foreground opacity-60 disabled:cursor-not-allowed"
+                <Link
+                  href={`/dashboard/sessions/${s.id}`}
+                  className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs hover:bg-accent"
                 >
                   Воспроизвести
-                </button>
+                </Link>
               </td>
             </tr>
           ))}

@@ -84,14 +84,30 @@ export class EventBuffer {
   flushFinal(): void {
     if (this.finalSent) return
     this.finalSent = true
-    const packet = this.buildPacket(true)
-    this.events = []
+
+    // Step 1: flush all pending events as a regular packet (isFinal=false).
+    // sendBeacon has a 64KB body limit; large buffers wouldn't fit, so we
+    // use sendPacket (fetch+keepalive) for the bulk and reserve sendBeacon
+    // for the tiny final ping below.
+    if (this.events.length > 0) {
+      const flushPacket = this.buildPacket(false)
+      this.events = []
+      this.packetIndex += 1
+      this.config.log('final flush — bulk', {
+        packetIndex: flushPacket.packetIndex,
+        eventCount: flushPacket.events.length,
+      })
+      void sendPacket(flushPacket)
+    }
+
+    // Step 2: send a tiny final packet (events=[]) — guaranteed to fit in
+    // sendBeacon's 64KB limit, ensures endedAt and matcher run server-side.
+    const finalPacket = this.buildPacket(true)
     this.packetIndex += 1
-    this.config.log('final flush', {
-      packetIndex: packet.packetIndex,
-      eventCount: packet.events.length,
+    this.config.log('final flush — sentinel', {
+      packetIndex: finalPacket.packetIndex,
     })
-    sendFinalPacket(packet)
+    sendFinalPacket(finalPacket)
   }
 
   private buildPacket(isFinal: boolean): Packet {

@@ -8,7 +8,17 @@ import {
   findMatchingTarget,
 } from "@/lib/analysis-target-matcher"
 
-const MAX_BODY_BYTES = 1024 * 1024
+// Yandex Serverless Containers имеет hard architectural limit 3.5 MB на
+// размер HTTP request (headers + body). Это не quota — поднять нельзя
+// ни через support, ни через флаги deploy. Источник:
+// https://yandex.cloud/en/docs/serverless-containers/concepts/limits
+//
+// Оставляем ~500 KB на headers (Cookie, User-Agent, Content-Type, etc),
+// body cap = 3 MiB. FullSnapshot rrweb с inlineStylesheet:true для
+// типичной Tilda-страницы укладывается в этот размер. Outliers >3 MiB
+// будут чанковаться в трекере (TODO в DECISIONS 2026-05-08, не в этом
+// коммите).
+const MAX_BODY_BYTES = 3 * 1024 * 1024
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",

@@ -24,18 +24,24 @@ function getCollectUrl(): string {
 
 const COLLECT_URL = getCollectUrl()
 
-export async function sendPacket(packet: Packet): Promise<void> {
+// Returns true if the packet was accepted by the server (HTTP 2xx),
+// false on any failure (network error, fetch TypeError, HTTP 4xx/5xx).
+// Caller (EventBuffer) increments a session-level dropped-packets counter
+// for observability. Single-line structured log makes 413/network drops
+// greppable in DevTools instead of buried in a generic warning.
+export async function sendPacket(packet: Packet): Promise<boolean> {
+  // Important: NO `keepalive: true` here. The W3C Fetch spec caps
+  // keepalive bodies at 64 KB total in-flight; FullSnapshot of the
+  // first packet and large incremental flushes routinely exceed that
+  // limit, which makes fetch throw TypeError → packet silently
+  // dropped → rrweb-player can't build initial DOM (white screen on
+  // replay). sendPacket runs during a live page (30s interval / 200
+  // events count flush), so keepalive isn't needed — the connection
+  // is healthy, and if it fails the next interval will retry-by-
+  // accumulation. The unload path is covered separately by
+  // sendFinalPacket → sendBeacon below.
+  const bodySize = JSON.stringify(packet).length
   try {
-    // Important: NO `keepalive: true` here. The W3C Fetch spec caps
-    // keepalive bodies at 64 KB total in-flight; FullSnapshot of the
-    // first packet and large incremental flushes routinely exceed that
-    // limit, which makes fetch throw TypeError → packet silently
-    // dropped → rrweb-player can't build initial DOM (white screen on
-    // replay). sendPacket runs during a live page (30s interval / 200
-    // events count flush), so keepalive isn't needed — the connection
-    // is healthy, and if it fails the next interval will retry-by-
-    // accumulation. The unload path is covered separately by
-    // sendFinalPacket → sendBeacon below.
     const response = await fetch(COLLECT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -44,16 +50,22 @@ export async function sendPacket(packet: Packet): Promise<void> {
     })
     if (!response.ok) {
       console.warn(
-        `${PREFIX} collect returned ${response.status} for packet ${packet.packetIndex}`,
+        `${PREFIX} PACKET DROPPED idx=${packet.packetIndex} ` +
+          `reason=http_${response.status} bytes=${bodySize} ` +
+          `events=${packet.events.length}`,
       )
+      return false
     }
+    return true
   } catch (err) {
     // Don't break the customer's site if our endpoint is down or blocked —
     // log and drop. Final-packet reliability comes via sendBeacon below.
     console.warn(
-      `${PREFIX} collect failed for packet ${packet.packetIndex}:`,
-      (err as Error).message,
+      `${PREFIX} PACKET DROPPED idx=${packet.packetIndex} ` +
+        `reason=fetch_threw err=${(err as Error).name}:${(err as Error).message} ` +
+        `bytes=${bodySize} events=${packet.events.length}`,
     )
+    return false
   }
 }
 

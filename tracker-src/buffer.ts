@@ -32,6 +32,12 @@ export class EventBuffer {
   private packetIndex = 0
   private intervalId: number | null = null
   private finalSent = false
+  // In-memory counter, не персистится в БД. На finalize логируется в
+  // console.warn для observability — оттуда видно по логам контейнера
+  // (через rrweb session debug на стороне клиента) сколько пакетов
+  // потерялось из-за 413/network. TODO: при появлении кейсов с
+  // массовыми drop'ами вынести в Session.droppedPackets через миграцию.
+  private droppedPackets = 0
   private readonly config: BufferConfig
 
   constructor(config: BufferConfig) {
@@ -78,7 +84,9 @@ export class EventBuffer {
       packetIndex: packet.packetIndex,
       eventCount: packet.events.length,
     })
-    void sendPacket(packet)
+    void sendPacket(packet).then((ok) => {
+      if (!ok) this.droppedPackets += 1
+    })
   }
 
   flushFinal(): void {
@@ -87,7 +95,7 @@ export class EventBuffer {
 
     // Step 1: flush all pending events as a regular packet (isFinal=false).
     // sendBeacon has a 64KB body limit; large buffers wouldn't fit, so we
-    // use sendPacket (fetch+keepalive) for the bulk and reserve sendBeacon
+    // use sendPacket (regular fetch) for the bulk and reserve sendBeacon
     // for the tiny final ping below.
     if (this.events.length > 0) {
       const flushPacket = this.buildPacket(false)
@@ -97,7 +105,9 @@ export class EventBuffer {
         packetIndex: flushPacket.packetIndex,
         eventCount: flushPacket.events.length,
       })
-      void sendPacket(flushPacket)
+      void sendPacket(flushPacket).then((ok) => {
+        if (!ok) this.droppedPackets += 1
+      })
     }
 
     // Step 2: send a tiny final packet (events=[]) — guaranteed to fit in
@@ -108,6 +118,18 @@ export class EventBuffer {
       packetIndex: finalPacket.packetIndex,
     })
     sendFinalPacket(finalPacket)
+
+    // Сводка по сессии: если что-то дропнулось — пишем в console.warn,
+    // чтобы юзер/наш QA при дебаге через DevTools видели одной строкой
+    // сколько потеряно.
+    if (this.droppedPackets > 0) {
+      console.warn(
+        '[webmonitor] session ended with droppedPackets=' +
+          this.droppedPackets +
+          ' sessionToken=' +
+          this.config.sessionToken,
+      )
+    }
   }
 
   private buildPacket(isFinal: boolean): Packet {

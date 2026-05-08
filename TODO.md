@@ -52,6 +52,14 @@
 - [ ] yc CLI команды (trigger create/get/delete) выводят payload
   в plaintext stdout. На будущее — для всех таких команд
   использовать `> /dev/null 2>&1` для подавления вывода.
+- [ ] IAM-токен пользователя засветился 2026-05-08 в выводе
+  `yc config list` (первые 4 символа: y0__). Принято решение
+  ротировать вместе с остальными секретами перед релизом MVP.
+- [ ] Lesson learned: `yc config list` всегда выводит token в
+  первой строке. На будущее использовать `yc config get
+  <field>` (например `yc config get folder-id`) либо
+  фильтровать `yc config list 2>&1 | grep -v '^token:'`.
+  Никогда не пайпать `yc config list` через простой `head`.
 
 ## UI / UX
 - [ ] Timezone в UI: дашборд сессий показывает дату/время в UTC,

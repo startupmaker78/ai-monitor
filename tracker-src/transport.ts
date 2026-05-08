@@ -26,12 +26,21 @@ const COLLECT_URL = getCollectUrl()
 
 export async function sendPacket(packet: Packet): Promise<void> {
   try {
+    // Important: NO `keepalive: true` here. The W3C Fetch spec caps
+    // keepalive bodies at 64 KB total in-flight; FullSnapshot of the
+    // first packet and large incremental flushes routinely exceed that
+    // limit, which makes fetch throw TypeError → packet silently
+    // dropped → rrweb-player can't build initial DOM (white screen on
+    // replay). sendPacket runs during a live page (30s interval / 200
+    // events count flush), so keepalive isn't needed — the connection
+    // is healthy, and if it fails the next interval will retry-by-
+    // accumulation. The unload path is covered separately by
+    // sendFinalPacket → sendBeacon below.
     const response = await fetch(COLLECT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(packet),
       credentials: 'omit',
-      keepalive: true,
     })
     if (!response.ok) {
       console.warn(
@@ -40,7 +49,7 @@ export async function sendPacket(packet: Packet): Promise<void> {
     }
   } catch (err) {
     // Don't break the customer's site if our endpoint is down or blocked —
-    // log and drop. Final-packet reliability comes via sendBeacon in part 5/8.
+    // log and drop. Final-packet reliability comes via sendBeacon below.
     console.warn(
       `${PREFIX} collect failed for packet ${packet.packetIndex}:`,
       (err as Error).message,

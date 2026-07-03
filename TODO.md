@@ -22,6 +22,30 @@
   (sessions/{siteId}/{token}/), средний MB на сессию. Через 1-2
   недели работы на nolim.cc.
 
+## Наблюдаемость трекера
+- [ ] Chunking пакетов >3 MiB — pending до появления
+  outlier-кейсов. Первая замерённая сессия nolim.cc после деплоя
+  a3291bc: FullSnapshot 1.40 MiB, packet 0 total 1.42 MiB (~47%
+  cap 3 MiB). Trigger для реализации chunking: любые логи
+  `[webmonitor] PACKET DROPPED` с reason=http_413 или замеры
+  packet bytes > 3 * 1024 * 1024. Проверять раз в неделю или при
+  жалобах на пробелы в плеере.
+- [ ] Мониторинг droppedPackets: если увидим
+  `session ended with droppedPackets>0` — приоритизировать
+  chunking. Structured log добавлен в трекере (deploy a3291bc):
+  `[webmonitor] PACKET DROPPED idx=X reason=... bytes=... events=...`
+  греппится в DevTools Console и в YC container logs.
+- [ ] После реализации DECISIONS 2026-05-08 (target URLs pivot)
+  — перезамерить FullSnapshot + incremental размеры.
+  FullSnapshot не изменится (это snapshot DOM), но incremental
+  events уменьшатся → общее тело пакета упадёт. Ожидание: cap
+  3 MiB станет ещё более комфортным.
+- [ ] Outlier cases для будущей chunking-задачи (для памяти при
+  анализе): страницы с очень большим DOM (длинные списки
+  товаров, бесконечный feed), inline data attributes /
+  комментариями, SPA-навигация с повторными FullSnapshot через
+  checkoutEveryNms.
+
 ## Pre-processor (этап 6.3, приоритет 2)
 - [ ] Cherry-pick 6.3a scaffold из ветки backup/6.3a-scaffold
   (origin, commit c65b202). Реализация pre-processor этапов 6.3

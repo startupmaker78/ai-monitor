@@ -6,6 +6,7 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 type RequiredEnv =
   | "YOS_BUCKET_NAME"
@@ -78,6 +79,36 @@ export async function putJson(
     }),
   )
   return { key, etag: result.ETag }
+}
+
+// Presigned GET URL для прямой скачки объекта клиентом через
+// storage.yandexcloud.net, минуя наш API Gateway (у которого response
+// body cap ~3.5 MB). Используем для отдачи rrweb-пакетов сессии в
+// player: response endpoint'а /api/sessions/[id]/events содержит
+// только массив URL'ов, а сами объекты (по 1-2 MiB каждый) браузер
+// стягивает параллельно с YOS.
+//
+// ⚠️ Bucket должен иметь CORS-policy разрешающую GET от нашего origin
+// (staging.вебмонитор.рф / production). Иначе браузер заблокирует
+// чтение response body несмотря на успешный 200 от YOS.
+export async function getPresignedGetUrl(
+  key: string,
+  expiresInSeconds: number = 300,
+): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: getBucketName(),
+    Key: key,
+  })
+  // Cast через Parameters<> — @aws-sdk/client-s3 и
+  // @aws-sdk/s3-request-presigner тянут разные копии @smithy/types
+  // в дереве, из-за чего TS видит их S3Client как несовместимые типы
+  // (private property `handlers` объявлена отдельно в каждой копии).
+  // Runtime-совместимость гарантирована — оба используют одинаковый
+  // signing protocol.
+  const client = s3Client as unknown as Parameters<typeof getSignedUrl>[0]
+  return await getSignedUrl(client, command, {
+    expiresIn: expiresInSeconds,
+  })
 }
 
 export async function getJson<T = unknown>(key: string): Promise<T> {

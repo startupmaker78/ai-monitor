@@ -6,8 +6,16 @@ import { Card, CardContent } from "@/components/ui/card"
 
 type RrwebEvent = { type: number; data: unknown; timestamp: number }
 
+type StoredPacket = {
+  packetIndex: number
+  events: RrwebEvent[]
+}
+
+type PacketRef = { url: string; packetIndex: number }
+
 type FetchState =
-  | { kind: "loading" }
+  | { kind: "fetching_manifest" }
+  | { kind: "fetching_packets" }
   | { kind: "error"; status: number; message: string }
   | { kind: "ready"; events: RrwebEvent[]; active: boolean }
 
@@ -19,41 +27,84 @@ type Props = { sessionId: string; active: boolean }
 // — он не использует браузерные API и Next 14 нормально его бандлит.
 export function SessionPlayer({ sessionId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [state, setState] = useState<FetchState>({ kind: "loading" })
+  const [state, setState] = useState<FetchState>({
+    kind: "fetching_manifest",
+  })
 
-  // Шаг 1: загрузка events через API.
+  // Шаг 1: получаем manifest (presigned URLs) от нашего endpoint'а.
+  // Шаг 2: parallel скачивание каждого пакета напрямую с YOS.
+  // Такая двухступенчатая схема обходит YC API Gateway response body
+  // cap ~3.5 MB — сессии с 5+ FullSnapshot'ами (по 1.2 MiB каждый)
+  // раньше валили endpoint с 502.
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/sessions/${sessionId}/events`)
-      .then(async (res) => {
+
+    async function loadSession() {
+      try {
+        // Шаг 1: manifest
+        const manifestRes = await fetch(`/api/sessions/${sessionId}/events`)
         if (cancelled) return
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as {
+        if (!manifestRes.ok) {
+          const data = (await manifestRes.json().catch(() => ({}))) as {
             message?: string
           }
           setState({
             kind: "error",
-            status: res.status,
-            message: data.message ?? `Ошибка ${res.status}`,
+            status: manifestRes.status,
+            message: data.message ?? `Ошибка ${manifestRes.status}`,
           })
           return
         }
-        const data = (await res.json()) as {
-          events: RrwebEvent[]
-          active: boolean
+        const manifest = (await manifestRes.json()) as {
+          packets: PacketRef[]
+          meta: {
+            totalPackets: number
+            active: boolean
+            startedAt: string
+            endedAt: string | null
+          }
         }
+        if (cancelled) return
+
+        // Шаг 2: parallel скачивание пакетов с YOS.
+        setState({ kind: "fetching_packets" })
+        const packetJsons = await Promise.all(
+          manifest.packets.map((p) =>
+            fetch(p.url).then(async (r) => {
+              if (!r.ok) {
+                throw new Error(
+                  `packet ${p.packetIndex} fetch failed: HTTP ${r.status}`,
+                )
+              }
+              return (await r.json()) as StoredPacket
+            }),
+          ),
+        )
+        if (cancelled) return
+
+        // Собираем events + сортируем по timestamp (как раньше делал
+        // server, теперь на клиенте после concatenation).
+        const events: RrwebEvent[] = []
+        for (const p of packetJsons) {
+          if (Array.isArray(p.events)) events.push(...p.events)
+        }
+        events.sort((a, b) => a.timestamp - b.timestamp)
+
         setState({
           kind: "ready",
-          events: data.events,
-          active: data.active,
+          events,
+          active: manifest.meta.active,
         })
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         if (cancelled) return
         const message =
           err instanceof Error ? err.message : "Ошибка сети"
         setState({ kind: "error", status: 0, message })
-      })
+      }
+    }
+
+    void loadSession()
+
     return () => {
       cancelled = true
     }
@@ -105,8 +156,12 @@ export function SessionPlayer({ sessionId }: Props) {
     }
   }, [state])
 
-  if (state.kind === "loading") {
-    return <Notice>Загрузка записи сессии…</Notice>
+  if (state.kind === "fetching_manifest") {
+    return <Notice>Получение доступа…</Notice>
+  }
+
+  if (state.kind === "fetching_packets") {
+    return <Notice>Загрузка записи…</Notice>
   }
 
   if (state.kind === "error") {

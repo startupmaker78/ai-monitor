@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { loadOwnedSession } from "@/lib/sessions-data"
-import { listKeys, getJson } from "@/lib/storage"
+import { listKeys, getPresignedGetUrl } from "@/lib/storage"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-type StoredPacket = {
-  packetIndex: number
-  events: Array<{ type: number; data: unknown; timestamp: number }>
-}
-
-type RrwebEvent = { type: number; data: unknown; timestamp: number }
+const PRESIGN_TTL_SECONDS = 600 // 10 min — safe margin для parallel fetch
 
 export async function GET(
   _req: NextRequest,
@@ -63,7 +58,7 @@ export async function GET(
     )
   }
 
-  // Сортировка по числовому packetIndex, как в analysis-target-matcher.ts.
+  // Сортировка по числовому packetIndex.
   const sorted = keys
     .map((k) => {
       const m = k.match(/\/(\d+)\.json$/)
@@ -72,14 +67,21 @@ export async function GET(
     .filter((x) => x.idx >= 0)
     .sort((a, b) => a.idx - b.idx)
 
-  let packets: StoredPacket[]
+  // Генерируем presigned URL для каждого пакета. Клиент скачает объекты
+  // напрямую с storage.yandexcloud.net — обходит YC API Gateway
+  // response body cap ~3.5 MB (реальные сессии с 5+ FullSnapshot'ами
+  // упирались в него, отдавали 502).
+  let packets: Array<{ url: string; packetIndex: number }>
   try {
     packets = await Promise.all(
-      sorted.map((s) => getJson<StoredPacket>(s.key)),
+      sorted.map(async (s) => ({
+        url: await getPresignedGetUrl(s.key, PRESIGN_TTL_SECONDS),
+        packetIndex: s.idx,
+      })),
     )
   } catch (err) {
     console.error(
-      "[session-events] getJson failed:",
+      "[session-events] presign failed:",
       (err as Error).message,
     )
     return NextResponse.json(
@@ -88,26 +90,21 @@ export async function GET(
     )
   }
 
-  const events: RrwebEvent[] = []
-  for (const packet of packets) {
-    if (Array.isArray(packet.events)) events.push(...packet.events)
-  }
-  events.sort((a, b) => a.timestamp - b.timestamp)
-
   return NextResponse.json(
     {
-      events,
-      totalEvents: events.length,
-      active: owned.endedAt === null,
-      startedAt: owned.startedAt.toISOString(),
-      endedAt: owned.endedAt ? owned.endedAt.toISOString() : null,
+      packets,
+      meta: {
+        totalPackets: packets.length,
+        active: owned.endedAt === null,
+        startedAt: owned.startedAt.toISOString(),
+        endedAt: owned.endedAt ? owned.endedAt.toISOString() : null,
+      },
     },
     {
       status: 200,
       headers: {
-        // private — events содержат рекординги юзеров (PII), CDN/прокси
-        // не должны кешировать. max-age=300 (5 мин) — баланс между
-        // реплеем и снижением S3-трафика.
+        // private — presigned URLs подписаны индивидуально (в них
+        // сигнатура и expiry), CDN/proxy не должны кешировать.
         "Cache-Control": "private, max-age=300",
       },
     },

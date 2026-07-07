@@ -72,8 +72,9 @@ jobs:
                    YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY \
                    RESEND_API_KEY IP_HASH_SALT \
                    CRON_SECRET \
-                   DEMO_USER_ID; do
-            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},version-id=e6qv1lflqjl8qbe7js2l,key=$k,environment-variable=$k"
+                   DEMO_USER_ID \
+                   MIN_SESSIONS_BUDGET; do
+            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},version-id=e6qnin7ikke6be7uv1o9,key=$k,environment-variable=$k"
           done
 
           eval yc serverless container revision deploy \

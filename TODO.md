@@ -46,6 +46,22 @@
   комментариями, SPA-навигация с повторными FullSnapshot через
   checkoutEveryNms.
 
+## Трекер / сессии (post-pivot 2026-07-07)
+- [ ] Пустые сессии жрут бюджет. После pivot'а сессия с events=0
+  (юзер зашёл на target и сразу закрыл) всё равно создаётся,
+  получает targetId и инкрементит sessionsCollected. Из 5
+  тестовых сессий academy только 1 имела 593 events, остальные
+  0-7. Предложить минимальный порог events (например, не
+  инкрементить sessionsCollected / не финализировать сессию если
+  events < N), чтобы AI-анализ не тратил бюджет на пустышки.
+  Требует продуктового решения по порогу.
+- [ ] sessionsCollected семантика изменена (pivot 2026-07-07):
+  теперь считает STARTED сессии (инкремент на первом пакете), а
+  не COMPLETED (раньше на isFinal). Существующие targets не
+  пересчитывались. Задокументировать в DECISIONS.md если ещё не.
+- [ ] Пре-pivot orphan сессии (без targetId) остаются в БД до
+  lifecycle-expire (30 дней). Не критично, само вычистится.
+
 ## Инфра / recovery
 - [ ] Post-suspend recovery runbook в DEPLOY_SETUP.md. После
   неоплаты Yandex Cloud суспендит ресурсы и НЕ восстанавливает
@@ -62,9 +78,20 @@
   staging.вебмонитор.рф, вебмонитор.рф, localhost:3000/3001.
   Bucket: webmonitor-prod-storage. Правило: GET, AllowedHeaders
   *, MaxAge 3600.
+- [ ] Gateway CORS настроен вручную. В openapi-спеке API Gateway
+  был блок `x-yc-apigateway.cors` с `origin:'*'`, который
+  перехватывал preflight и глушил CORS из контейнера (ломал
+  sendBeacon с credentials). Убрали блок вручную через
+  `api-gateway update --spec`. Нужно: (а) вынести спеку gateway в
+  инфра-as-code / репозиторий, чтобы не потерять при
+  пересоздании; (б) задокументировать что CORS живёт в
+  контейнере (route.ts), gateway не должен лезть.
 - [ ] YC Logging read quota исчерпывается (ResourceExhausted).
   Проверить настройки квоты logging group, при необходимости
   увеличить или reduce log verbosity в container.
+- [ ] MIN_SESSIONS_BUDGET сейчас =5 на staging (для тестов
+  academy). Перед релизом MVP вернуть 100 (сменой значения в
+  Lockbox + redeploy revision, без rebuild).
 
 ## Pre-processor (этап 6.3, приоритет 2)
 - [ ] Cherry-pick 6.3a scaffold из ветки backup/6.3a-scaffold
@@ -142,10 +169,10 @@
   или через `yc lockbox payload get --latest` при деплое.
 
 ## Минор
-- [ ] npm audit: 11 vulnerabilities (7 moderate, 4 high) после
-  установки rrweb-player. Проверить — наши пакеты или transitive
-  deps. Скорее всего false-positive в dev deps, но запланировать
-  audit fix.
+- [ ] npm audit: vulnerabilities после установки rrweb-player +
+  @aws-sdk/s3-request-presigner. Изначально 11 (7 moderate,
+  4 high). Проверить — наши пакеты или transitive deps. Скорее
+  всего false-positive в dev deps, но запланировать audit fix.
 - [ ] Node.js engine warning: `@prisma/streams-local@0.1.2`
   требует bun >=1.3.6 / node >=22.0.0, у нас node 20.20.2.
   Игнорируем (это transitive), но проверить — не используется ли

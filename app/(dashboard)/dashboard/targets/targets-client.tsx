@@ -29,6 +29,10 @@ type Props = {
   sessionsAllocated: number
   sessionsRemaining: number
   targetsRemaining: number
+  // Из env MIN_SESSIONS_BUDGET (server-only, читается в page.tsx).
+  // Управляет и minимумом бюджета при создании цели, и порогом
+  // "готова к анализу" в подписи кнопки.
+  minSessionsBudget: number
 }
 
 const initialState: ActionResult | null = null
@@ -61,7 +65,9 @@ function ArchiveSubmitButton() {
 
 export function TargetsClient(props: Props) {
   const [createState, createAction] = useFormState(createTarget, initialState)
-  const canCreate = props.targetsRemaining > 0 && props.sessionsRemaining >= 100
+  const canCreate =
+    props.targetsRemaining > 0 &&
+    props.sessionsRemaining >= props.minSessionsBudget
 
   return (
     <div className="space-y-6">
@@ -92,7 +98,7 @@ export function TargetsClient(props: Props) {
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               {props.targetsRemaining <= 0
                 ? "Достигнут лимит целей вашего тарифа. Архивируйте неиспользуемые."
-                : "Недостаточно свободных сессий (нужно минимум 100)."}
+                : `Недостаточно свободных сессий (нужно минимум ${props.minSessionsBudget}).`}
             </div>
           )}
           <form action={createAction} className="space-y-4">
@@ -132,16 +138,16 @@ export function TargetsClient(props: Props) {
                 id="sessionsBudget"
                 name="sessionsBudget"
                 type="number"
-                min={100}
+                min={props.minSessionsBudget}
                 max={props.sessionsRemaining}
                 step={50}
-                defaultValue={Math.min(500, props.sessionsRemaining)}
+                defaultValue={props.minSessionsBudget}
                 required
                 disabled={!canCreate}
               />
               <p className="text-xs text-muted-foreground">
-                Сколько сессий собрать перед AI-анализом. Минимум 100.
-                Доступно: {props.sessionsRemaining}.
+                Сколько сессий собрать перед AI-анализом. Минимум{" "}
+                {props.minSessionsBudget}. Доступно: {props.sessionsRemaining}.
               </p>
             </div>
 
@@ -168,7 +174,11 @@ export function TargetsClient(props: Props) {
         ) : (
           <div className="space-y-3">
             {props.activeTargets.map((t) => (
-              <TargetCard key={t.id} target={t} />
+              <TargetCard
+                key={t.id}
+                target={t}
+                minSessionsBudget={props.minSessionsBudget}
+              />
             ))}
           </div>
         )}
@@ -181,7 +191,12 @@ export function TargetsClient(props: Props) {
           </h3>
           <div className="space-y-3">
             {props.archivedTargets.map((t) => (
-              <TargetCard key={t.id} target={t} archived />
+              <TargetCard
+                key={t.id}
+                target={t}
+                archived
+                minSessionsBudget={props.minSessionsBudget}
+              />
             ))}
           </div>
         </div>
@@ -201,9 +216,11 @@ const STATUS_LABELS: Record<string, string> = {
 function TargetCard({
   target,
   archived = false,
+  minSessionsBudget,
 }: {
   target: TargetWithStats
   archived?: boolean
+  minSessionsBudget: number
 }) {
   const [archiveState, archiveAction] = useFormState(
     archiveTarget,
@@ -279,6 +296,7 @@ function TargetCard({
                 target={target}
                 analyzing={analyzing}
                 onAnalyze={handleAnalyze}
+                minSessionsBudget={minSessionsBudget}
               />
               <ArchiveControl
                 target={target}
@@ -309,15 +327,17 @@ function AnalyzeButton({
   target,
   analyzing,
   onAnalyze,
+  minSessionsBudget,
 }: {
   target: TargetWithStats
   analyzing: boolean
   onAnalyze: () => void
+  minSessionsBudget: number
 }) {
   if (target.status === "ACTIVE") {
     return (
       <Button type="button" size="sm" disabled>
-        {`Накоплено ${target.sessionsCollected}/${target.sessionsBudget} (нужно ≥100)`}
+        {`Накоплено ${target.sessionsCollected}/${target.sessionsBudget} (нужно ≥${minSessionsBudget})`}
       </Button>
     )
   }

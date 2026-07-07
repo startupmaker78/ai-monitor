@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { getTargetsPageData } from "@/lib/targets-data"
+import { getMinSessionsBudget } from "@/lib/config"
 import { TargetsClient } from "./targets-client"
 import { SiteSelector } from "../settings/metrika/site-selector"
 
@@ -54,6 +55,7 @@ export default async function TargetsPage({ searchParams }: PageProps) {
         sessionsAllocated={data.sessionsAllocated}
         sessionsRemaining={data.sessionsRemaining}
         targetsRemaining={data.targetsRemaining}
+        minSessionsBudget={getMinSessionsBudget()}
       />
     </div>
   )

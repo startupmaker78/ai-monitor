@@ -6,6 +6,7 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { getEffectiveTier } from "@/lib/tier-limits"
 import { validateSiteOwnership } from "@/lib/site-data"
+import { getMinSessionsBudget } from "@/lib/config"
 
 export type ActionResult = {
   ok: boolean
@@ -16,19 +17,26 @@ export type ActionResult = {
   field?: "url" | "sessionsBudget" | "name" | null
 }
 
-const createSchema = z.object({
-  siteId: z.string().min(1),
-  url: z.string().url("Введите корректный URL вида https://site.ru/page"),
-  name: z.string().max(100).optional().or(z.literal("")),
-  sessionsBudget: z.coerce.number().int().min(100, "Минимум 100 сессий"),
-})
-
 export async function createTarget(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
   const session = await auth()
   if (!session?.user?.id) return { ok: false, error: "Не авторизован" }
+
+  // Schema строится per-request, чтобы min sessionsBudget читался из
+  // env на каждый вызов — так дефолт (100) можно поменять через
+  // Lockbox + revision redeploy без rebuild кода.
+  const minSessionsBudget = getMinSessionsBudget()
+  const createSchema = z.object({
+    siteId: z.string().min(1),
+    url: z.string().url("Введите корректный URL вида https://site.ru/page"),
+    name: z.string().max(100).optional().or(z.literal("")),
+    sessionsBudget: z
+      .coerce.number()
+      .int()
+      .min(minSessionsBudget, `Минимум ${minSessionsBudget} сессий`),
+  })
 
   const parsed = createSchema.safeParse({
     siteId: formData.get("siteId"),

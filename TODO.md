@@ -46,6 +46,26 @@
   комментариями, SPA-навигация с повторными FullSnapshot через
   checkoutEveryNms.
 
+## Инфра / recovery
+- [ ] Post-suspend recovery runbook в DEPLOY_SETUP.md. После
+  неоплаты Yandex Cloud суспендит ресурсы и НЕ восстанавливает
+  автоматически при оплате. Вручную поднимать (в порядке):
+  1. PostgreSQL cluster: `yc managed-postgresql cluster start
+     <id>` (~5 мин)
+  2. API Gateway: `yc serverless api-gateway resume <id>`
+  3. Cron trigger: `yc serverless trigger resume <id>`
+  Проверить: домен резолвится, /api/health отвечает, login
+  работает.
+- [ ] Bucket CORS настроен вручную через одноразовый скрипт
+  (PutBucketCorsCommand). Нужно вынести в инфра-as-code или в
+  setup-скрипт репозитория. Текущие allowed origins:
+  staging.вебмонитор.рф, вебмонитор.рф, localhost:3000/3001.
+  Bucket: webmonitor-prod-storage. Правило: GET, AllowedHeaders
+  *, MaxAge 3600.
+- [ ] YC Logging read quota исчерпывается (ResourceExhausted).
+  Проверить настройки квоты logging group, при необходимости
+  увеличить или reduce log verbosity в container.
+
 ## Pre-processor (этап 6.3, приоритет 2)
 - [ ] Cherry-pick 6.3a scaffold из ветки backup/6.3a-scaffold
   (origin, commit c65b202). Реализация pre-processor этапов 6.3
@@ -99,6 +119,15 @@
   постоянная директория для архитектурных планов фич, или
   удалять после реализации? Сейчас там лежит
   rrweb-player-plan.md (untracked).
+
+## Плеер сессий (оптимизации, не срочно)
+- [ ] Presigned URL approach работает, но при 20+ packets
+  браузер делает 20+ parallel fetch. Для очень длинных сессий
+  (сотни packets) — рассмотреть pagination или single
+  pre-merged blob. Замерить UX на сессии с 100+ packets.
+- [ ] rrweb checkoutEveryNms=300s даёт FullSnapshot ~1.2MB
+  каждые 5 минут. Длинная сессия (час) = 12 snapshots = 14+ MB
+  total download. Приемлемо для MVP, но мониторить.
 
 ## Документация
 - [ ] DECISIONS.md полная запись за 2026-05-07 (длинный день: 

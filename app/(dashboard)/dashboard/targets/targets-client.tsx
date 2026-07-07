@@ -3,6 +3,7 @@
 import { useFormState, useFormStatus } from "react-dom"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -361,10 +362,21 @@ function AnalyzeButton({
     )
   }
   if (target.status === "COMPLETED") {
+    // Успешная транзакция analysis-runner'а переводит target в COMPLETED
+    // только после записи Recommendation'ов, поэтому COMPLETED
+    // однозначно означает «рекомендации есть».
     return (
-      <Button type="button" size="sm" disabled>
-        Завершён в этом периоде
-      </Button>
+      <div className="flex flex-col items-end gap-1">
+        <Button type="button" size="sm" disabled>
+          Завершён в этом периоде
+        </Button>
+        <Link
+          href={`/dashboard/recommendations?targetId=${target.id}`}
+          className="text-xs text-primary hover:underline"
+        >
+          Перейти к рекомендациям →
+        </Link>
+      </div>
     )
   }
   return null

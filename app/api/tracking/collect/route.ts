@@ -3,10 +3,6 @@ import { trackingPacketSchema } from "@/lib/tracking-schema"
 import { prisma } from "@/lib/prisma"
 import { putJson } from "@/lib/storage"
 import { hashIp, extractClientIp } from "@/lib/ip-hash"
-import {
-  computeDominantUrl,
-  findMatchingTarget,
-} from "@/lib/analysis-target-matcher"
 
 // Yandex Serverless Containers имеет hard architectural limit 3.5 MB на
 // размер HTTP request (headers + body). Это не quota — поднять нельзя
@@ -88,13 +84,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return corsResponse({ error: "unknown_site" }, { status: 401 })
   }
 
-  // Шаг 6: пакет в Object Storage. Ключ:
+  // Serverside validation packet.targetId. Клиенту НЕ доверяем — он мог
+  // прислать чужой/архивированный/несуществующий target. Не reject'им
+  // весь packet, а просто сбрасываем targetId → сессия становится
+  // orphan (analysisTargetId=null, sessionsCollected не тронут). Это
+  // совместимо со старым tracker.js (тоже без targetId → orphan).
+  //
+  // archivedAt=null ЕДИНСТВЕННЫЙ жёсткий гейт. Статус (ACTIVE/READY/
+  // ANALYZING/COMPLETED) намеренно не проверяется: между первым и
+  // последующими packet'ами target мог перейти в ANALYZING/COMPLETED
+  // (юзер запустил анализ) — in-flight сессия должна дописаться.
+  let validatedTargetId: string | null = null
+  if (packet.targetId) {
+    const target = await prisma.analysisTarget.findUnique({
+      where: { id: packet.targetId },
+      select: { id: true, siteId: true, archivedAt: true },
+    })
+    if (target && target.siteId === site.id && target.archivedAt === null) {
+      validatedTargetId = target.id
+    } else {
+      console.warn(
+        "[tracking] rejecting targetId=" + packet.targetId +
+          " for site=" + site.id + ": not owned or archived",
+      )
+    }
+  }
+
+  // Packet в Object Storage. Ключ:
   //   sessions/{siteId}/{sessionToken}/{packetIndex}.json
-  // Lifecycle policy на префикс sessions/ удаляет объекты старше 30 дней
-  // (см. ROADMAP этап 0.a). При AI-анализе сессии достаём все пакеты
-  // через listKeys('sessions/{siteId}/{sessionToken}/').
+  // Lifecycle policy на префикс sessions/ удаляет объекты старше 30 дней.
   const storageKey =
-    `sessions/${site.id}/${packet.sessionToken}/${packet.packetIndex}.json`
+    "sessions/" + site.id + "/" + packet.sessionToken + "/" +
+    packet.packetIndex + ".json"
 
   try {
     await putJson(storageKey, {
@@ -115,93 +136,77 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return corsResponse({ error: "storage_failed" }, { status: 503 })
   }
 
-  // Шаг 7: Session в PostgreSQL. Идемпотентно через upsert по sessionToken
-  // (он @unique). Первый пакет создаёт ряд, последующие инкрементят
-  // eventsCount. isFinal выставляет endedAt.
+  // Session в PostgreSQL. См. DECISIONS 2026-05-08 / plans/
+  // record-only-on-target-plan.md C.3 — атомарный createMany +
+  // skipDuplicates + branching:
+  //   FIRST packet (createMany.count === 1):
+  //     — Session row создан с eventsCount = packet.events.length,
+  //       analysisTargetId = validatedTargetId,
+  //       endedAt = packet.isFinal ? now : null
+  //     — Если есть validatedTargetId → инкремент sessionsCollected
+  //       (ровно один раз за жизнь сессии)
+  //   SUBSEQUENT packet (count === 0):
+  //     — Session уже существует, обновляем eventsCount (increment) и
+  //       опционально endedAt (если isFinal). analysisTargetId
+  //       immutable — targetId, попавший в create, остаётся навсегда.
+  //
+  // Race двух concurrent packets того же sessionToken разруливается
+  // unique-constraint на Session.sessionToken (@unique в schema).
+  const prefix = "sessions/" + site.id + "/" + packet.sessionToken + "/"
+  const nowDate = new Date()
+  const startedAtDate = new Date(packet.startedAt)
   const ipHash = hashIp(extractClientIp(req))
-  const now = new Date()
-  const sessionPrefix = `sessions/${site.id}/${packet.sessionToken}/`
 
   try {
-    await prisma.session.upsert({
-      where: { sessionToken: packet.sessionToken },
-      create: {
-        siteId: site.id,
-        sessionToken: packet.sessionToken,
-        ipHash,
-        userAgent: packet.userAgent,
-        startedAt: new Date(packet.startedAt),
-        endedAt: packet.isFinal ? now : null,
-        eventsCount: packet.events.length,
-        storageKey: sessionPrefix,
-        // analysisTargetId — null в этом коммите, выставится в 5/8
-      },
-      update: {
-        // TODO: not idempotent on retry. eventsCount can drift if the client
-        // retries the same packetIndex. Acceptable for MVP because eventsCount
-        // is telemetry only — real session content lives in Object Storage
-        // (idempotent: putJson overwrites by key). When we wire
-        // Subscription.sessionsCollected to billing tariff limits, switch to
-        // INSERT ... ON CONFLICT DO NOTHING via separate SessionPacketReceipt
-        // table with UNIQUE (sessionToken, packetIndex).
-        eventsCount: { increment: packet.events.length },
-        ...(packet.isFinal ? { endedAt: now } : {}),
-      },
+    await prisma.$transaction(async (tx) => {
+      const created = await tx.session.createMany({
+        data: [
+          {
+            siteId: site.id,
+            sessionToken: packet.sessionToken,
+            ipHash,
+            userAgent: packet.userAgent,
+            startedAt: startedAtDate,
+            endedAt: packet.isFinal ? nowDate : null,
+            eventsCount: packet.events.length,
+            storageKey: prefix,
+            analysisTargetId: validatedTargetId,
+          },
+        ],
+        skipDuplicates: true,
+      })
+
+      const isFirstPacket = created.count === 1
+
+      if (!isFirstPacket) {
+        // TODO: eventsCount increment всё ещё не идемпотентен на retry
+        // одного packetIndex (DECISIONS 2026-05-03 «acceptable»).
+        // Проблема out of scope этого коммита.
+        await tx.session.update({
+          where: { sessionToken: packet.sessionToken },
+          data: {
+            eventsCount: { increment: packet.events.length },
+            ...(packet.isFinal ? { endedAt: nowDate } : {}),
+          },
+        })
+      }
+
+      if (isFirstPacket && validatedTargetId) {
+        await tx.analysisTarget.update({
+          where: { id: validatedTargetId },
+          data: { sessionsCollected: { increment: 1 } },
+        })
+      }
     })
   } catch (err) {
     console.error(
-      "[tracking] Session upsert failed:",
+      "[tracking] Session transaction failed:",
       (err as Error).message,
     )
     return corsResponse(
-      { error: "session_upsert_failed" },
+      { error: "session_transaction_failed" },
       { status: 500 },
     )
-  }
-
-  // Шаг 8: матчинг AnalysisTarget по доминантному URL — только на
-  // финальном пакете (когда сессия закрыта и таймлайн полный). Ошибки
-  // не валят запрос: Session и пакеты уже сохранены, матчинг
-  // best-effort.
-  if (packet.isFinal) {
-    try {
-      const dominantUrl = await computeDominantUrl(
-        site.id,
-        packet.sessionToken,
-        now.getTime(),
-      )
-      if (dominantUrl) {
-        const targetId = await findMatchingTarget(site.id, dominantUrl)
-        if (targetId) {
-          // Идемпотентно: updateMany с условием analysisTargetId=null
-          // выставит target только один раз. Повторный финальный пакет
-          // вернёт count=0, increment второй раз не уйдёт.
-          const updated = await prisma.session.updateMany({
-            where: {
-              sessionToken: packet.sessionToken,
-              analysisTargetId: null,
-            },
-            data: { analysisTargetId: targetId },
-          })
-          if (updated.count === 1) {
-            await prisma.analysisTarget.update({
-              where: { id: targetId },
-              data: { sessionsCollected: { increment: 1 } },
-            })
-            console.log(
-              "[tracking] matched target " + targetId.slice(0, 8) +
-                " for session " + packet.sessionToken.slice(0, 8) +
-                " url=" + dominantUrl,
-            )
-          }
-        }
-      }
-    } catch (err) {
-      console.error(
-        "[tracking] target matching failed:",
-        (err as Error).message,
-      )
-    }
   }
 
   console.log(
@@ -209,6 +214,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       " session=" + packet.sessionToken.slice(0, 8) +
       " packet=" + packet.packetIndex +
       " events=" + packet.events.length +
+      " target=" + (validatedTargetId ? validatedTargetId.slice(0, 8) : "-") +
       " final=" + (packet.isFinal ? "Y" : "N") +
       " bytes=" + raw.length,
   )

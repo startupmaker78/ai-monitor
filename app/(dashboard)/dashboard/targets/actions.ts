@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma"
 import { getEffectiveTier } from "@/lib/tier-limits"
 import { validateSiteOwnership } from "@/lib/site-data"
 import { getMinSessionsBudget } from "@/lib/config"
+import { normalizeUrl } from "@/lib/url-normalize"
 
 export type ActionResult = {
   ok: boolean
@@ -76,10 +77,14 @@ export async function createTarget(
     }
   }
 
-  // 2. Дубль URL на сайте (siteId + url).
-  const newUrlNormalized = normalizeUrl(parsed.data.url)
+  // 2. Дубль URL на сайте (siteId + url). Fallback на raw при невалидном
+  // URL — сохраняет прежнее поведение старой локальной normalizeUrl,
+  // которая возвращала raw для invalid; общий util в @/lib/url-normalize
+  // возвращает null.
+  const newUrlNormalized =
+    normalizeUrl(parsed.data.url) ?? parsed.data.url
   const isDuplicate = activeTargets.some(
-    (t) => normalizeUrl(t.url) === newUrlNormalized,
+    (t) => (normalizeUrl(t.url) ?? t.url) === newUrlNormalized,
   )
   if (isDuplicate) {
     return {
@@ -190,21 +195,3 @@ export async function archiveTarget(
   return { ok: true, message: "Цель архивирована" }
 }
 
-// Нормализация URL для проверки дублей. Дублирует логику
-// lib/analysis-target-matcher.ts намеренно — локальная ответственность,
-// вынесем в общий util если будет третий callsite.
-function normalizeUrl(raw: string): string {
-  try {
-    const u = new URL(raw)
-    u.search = ""
-    u.hash = ""
-    u.hostname = u.hostname.toLowerCase()
-    let path = u.pathname
-    if (path.length > 1 && path.endsWith("/")) {
-      path = path.slice(0, -1)
-    }
-    return `${u.protocol}//${u.host}${path}`
-  } catch {
-    return raw
-  }
-}

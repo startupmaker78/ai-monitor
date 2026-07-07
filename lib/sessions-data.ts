@@ -10,7 +10,7 @@ export type SessionsForUser = {
     eventsCount: number
     ipHash: string
     site: { id: string; domain: string; isDemo: boolean }
-    analysisTarget: { id: string; url: string } | null
+    analysisTarget: { id: string; url: string; name: string | null } | null
   }>
   selectedSiteId: string | null
 }
@@ -47,7 +47,7 @@ export async function getSessionsForUser(
     take: 50,
     include: {
       site: { select: { id: true, domain: true, isDemo: true } },
-      analysisTarget: { select: { id: true, url: true } },
+      analysisTarget: { select: { id: true, url: true, name: true } },
     },
   })
 
@@ -64,7 +64,7 @@ export type OwnedSession = {
   eventsCount: number
   ipHash: string
   site: { domain: string; isDemo: boolean }
-  analysisTarget: { id: string; url: string } | null
+  analysisTarget: { id: string; url: string; name: string | null } | null
 }
 
 // Загружает Session по id и проверяет, что она принадлежит юзеру через
@@ -85,7 +85,7 @@ export async function loadOwnedSession(
     where: { id: sessionId },
     include: {
       site: { select: { ownerId: true, domain: true, isDemo: true } },
-      analysisTarget: { select: { id: true, url: true } },
+      analysisTarget: { select: { id: true, url: true, name: true } },
     },
   })
   if (!found || found.site.ownerId !== op.id) return null

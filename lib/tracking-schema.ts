@@ -20,6 +20,11 @@ export const trackingPacketSchema = z.object({
   pageUrl: z.string().url().max(2048),
   userAgent: z.string().max(1024),
   startedAt: z.number().int().positive(),
+  // Опциональный — для backward compat со старым tracker.js,
+  // закешированным у части юзеров. Новый tracker включает targetId в
+  // КАЖДЫЙ packet. Serverside collect-route дополнительно валидирует,
+  // что targetId принадлежит этому siteId и не архивирован.
+  targetId: z.string().min(1).optional(),
 })
 
 export type TrackingPacket = z.infer<typeof trackingPacketSchema>

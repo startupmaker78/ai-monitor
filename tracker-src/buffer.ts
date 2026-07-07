@@ -18,6 +18,13 @@ type Logger = (...args: unknown[]) => void
 export type BufferConfig = {
   sessionToken: string
   siteToken: string
+  // targetId получен от /api/tracking/should-record при инициализации
+  // трекера. Обязателен: трекер стартует только после подтверждения
+  // сервером что этот pageUrl соответствует ACTIVE/READY цели. Каждый
+  // packet включает targetId — serverside collect route идемпотентно
+  // инкрементит AnalysisTarget.sessionsCollected на первом packet
+  // сессии (см. DECISIONS 2026-05-08 «record only on target URLs»).
+  targetId: string
   pageUrl: string
   userAgent: string
   startedAt: number
@@ -136,6 +143,9 @@ export class EventBuffer {
     return {
       sessionToken: this.config.sessionToken,
       siteToken: this.config.siteToken,
+      // targetId в КАЖДОМ packet без исключения — required-инвариант
+      // трекера. См. DECISIONS 2026-05-08.
+      targetId: this.config.targetId,
       packetIndex: this.packetIndex,
       isFinal,
       events: this.events.slice(),

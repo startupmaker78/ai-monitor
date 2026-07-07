@@ -51,7 +51,7 @@ export function SessionsTable({ sessions, selectedSiteId, currentSort }: Props) 
             </th>
             <th className="px-4 py-3 font-medium">Длительность</th>
             <th className="px-4 py-3 font-medium">Сайт</th>
-            <th className="px-4 py-3 font-medium">Целевая страница</th>
+            <th className="px-4 py-3 font-medium">Цель</th>
             <th className="px-4 py-3 font-medium text-right">События</th>
             <th className="px-4 py-3 font-medium">Посетитель</th>
             <th className="px-4 py-3 font-medium text-right">Действие</th>
@@ -81,7 +81,10 @@ export function SessionsTable({ sessions, selectedSiteId, currentSort }: Props) 
               <td className="px-4 py-3">
                 {s.analysisTarget ? (
                   <span title={s.analysisTarget.url}>
-                    {truncate(s.analysisTarget.url, 40)}
+                    {truncate(
+                      s.analysisTarget.name ?? s.analysisTarget.url,
+                      40,
+                    )}
                   </span>
                 ) : (
                   <span className="text-muted-foreground">—</span>

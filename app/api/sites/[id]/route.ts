@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { listKeys, deleteObjects } from "@/lib/storage"
+
+const S3_BATCH_SIZE = 1000 // хардкод из S3 DeleteObjects API
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -56,20 +59,61 @@ export async function DELETE(
       { status: 403 },
     )
   }
-  const sessionsCount = await prisma.session.count({
-    where: { siteId: site.id },
-  })
-  if (sessionsCount > 0) {
-    return NextResponse.json(
-      {
-        error: "conflict",
-        message:
-          "Удаление сайтов с собранными сессиями пока не поддерживается. Удалите сайт после полной очистки сессий (через 30 дней).",
-      },
-      { status: 409 },
+
+  // 1. S3 cleanup ПЕРЕД транзакцией. S3 не транзакционен, а транзакция
+  // Prisma должна быть атомарной — оставляем S3 отдельно. Если что-то
+  // не удалилось в S3, не блокируем DB deletion: orphaned объекты
+  // уберёт lifecycle policy на префикс sessions/ (30 дней).
+  try {
+    const keys = await listKeys(`sessions/${site.id}/`)
+    if (keys.length > 0) {
+      let totalFailed = 0
+      for (let i = 0; i < keys.length; i += S3_BATCH_SIZE) {
+        const batch = keys.slice(i, i + S3_BATCH_SIZE)
+        const failed = await deleteObjects(batch)
+        totalFailed += failed.length
+      }
+      if (totalFailed > 0) {
+        console.warn(
+          `[site-delete] S3 cleanup: ${totalFailed} keys failed for site ${site.id}`,
+        )
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[site-delete] S3 cleanup failed for site ${site.id}: ${(err as Error).message}`,
     )
   }
-  await prisma.site.delete({ where: { id: site.id } })
+
+  // 2. DB cleanup в транзакции. Порядок важен из-за Restrict FKs:
+  //  - Analysis (Restrict-refs Site и AnalysisTarget) → удаляем первым;
+  //    Recommendation cascade'ит автоматически (onDelete: Cascade)
+  //  - Session (Restrict-refs Site, SetNull-refs AnalysisTarget) →
+  //    SetNull не срабатывает, потому что мы уже не выходим из
+  //    транзакции; безопасно удалять раньше AnalysisTarget
+  //  - AnalysisTarget (Restrict-refs Site) → теперь ничто на неё
+  //    не Restrict-ссылается
+  //  - MetricsSnapshot (Restrict-refs Site)
+  //  - Site last
+  try {
+    await prisma.$transaction([
+      prisma.analysis.deleteMany({ where: { siteId: site.id } }),
+      prisma.session.deleteMany({ where: { siteId: site.id } }),
+      prisma.analysisTarget.deleteMany({ where: { siteId: site.id } }),
+      prisma.metricsSnapshot.deleteMany({ where: { siteId: site.id } }),
+      prisma.site.delete({ where: { id: site.id } }),
+    ])
+  } catch (err) {
+    console.error(
+      `[site-delete] DB transaction failed for site ${site.id}:`,
+      (err as Error).message,
+    )
+    return NextResponse.json(
+      { error: "delete_failed", message: "Не удалось удалить сайт" },
+      { status: 500 },
+    )
+  }
+
   return new NextResponse(null, { status: 204 })
 }
 

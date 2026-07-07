@@ -70,7 +70,7 @@ export function SitesClient({ initialSites }: Props) {
   async function handleDelete(site: Site) {
     if (
       !confirm(
-        `Удалить сайт «${site.domain}»? Это действие необратимо.`,
+        `Удалить сайт «${site.domain}»? Все собранные сессии и записи будут удалены безвозвратно.`,
       )
     ) {
       return

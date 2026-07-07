@@ -6,12 +6,28 @@ import { normalizeUrl } from "@/lib/url-normalize"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-} as const
+// Динамический CORS: reflect Origin + Access-Control-Allow-Credentials,
+// если Origin передан (нужно для совместимости с sendBeacon, который
+// шлёт credentials:'include' безусловно — см. collect route). Wildcard
+// как fallback для server-to-server / curl запросов.
+function corsHeaders(origin: string | null): Record<string, string> {
+  if (origin) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+      Vary: "Origin",
+    }
+  }
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+  }
+}
 
 // no-store: target может появиться/архивироваться в моменте, и любой
 // кеш создаст «сессия не пишется N секунд после создания цели» — плохой
@@ -21,16 +37,24 @@ const NO_CACHE_HEADERS = { "Cache-Control": "no-store" } as const
 
 function corsResponse(
   body: unknown,
+  origin: string | null,
   init: ResponseInit = {},
 ): NextResponse {
   return NextResponse.json(body, {
     ...init,
-    headers: { ...CORS_HEADERS, ...NO_CACHE_HEADERS, ...init.headers },
+    headers: {
+      ...corsHeaders(origin),
+      ...NO_CACHE_HEADERS,
+      ...init.headers,
+    },
   })
 }
 
-export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+export async function OPTIONS(req: NextRequest): Promise<NextResponse> {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders(req.headers.get("origin")),
+  })
 }
 
 const querySchema = z.object({
@@ -39,6 +63,8 @@ const querySchema = z.object({
 })
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const origin = req.headers.get("origin")
+
   const parsed = querySchema.safeParse({
     token: req.nextUrl.searchParams.get("token"),
     url: req.nextUrl.searchParams.get("url"),
@@ -46,6 +72,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!parsed.success) {
     return corsResponse(
       { record: false, reason: "bad_request" },
+      origin,
       { status: 400 },
     )
   }
@@ -54,6 +81,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!normalized) {
     return corsResponse(
       { record: false, reason: "invalid_url" },
+      origin,
       { status: 400 },
     )
   }
@@ -65,6 +93,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!site) {
     return corsResponse(
       { record: false, reason: "unknown_site" },
+      origin,
       { status: 404 },
     )
   }
@@ -100,12 +129,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!matched) {
-    return corsResponse({ record: false, reason: "no_target" })
+    return corsResponse({ record: false, reason: "no_target" }, origin)
   }
 
   if (matched.sessionsCollected >= matched.sessionsBudget) {
-    return corsResponse({ record: false, reason: "budget_exhausted" })
+    return corsResponse(
+      { record: false, reason: "budget_exhausted" },
+      origin,
+    )
   }
 
-  return corsResponse({ record: true, targetId: matched.id })
+  return corsResponse({ record: true, targetId: matched.id }, origin)
 }

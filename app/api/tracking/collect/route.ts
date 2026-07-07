@@ -16,32 +16,60 @@ import { hashIp, extractClientIp } from "@/lib/ip-hash"
 // коммите).
 const MAX_BODY_BYTES = 3 * 1024 * 1024
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-} as const
+// Динамический CORS: `sendBeacon` (используется трекером для финального
+// sentinel-пакета) ВСЕГДА шлёт cross-origin с credentials:'include' по
+// browser spec (отключить нельзя). Комбо wildcard '*' + credentials
+// запрещено браузерами → beacon блокируется CORS → sentinel не долетает.
+//
+// Решение: если Origin передан в запросе — рефлектим его обратно и
+// разрешаем credentials. Vary: Origin, чтобы CDN/прокси не смешивали
+// ответы разных origin'ов. Если Origin нет (server-to-server, curl) —
+// wildcard без credentials (безопасный fallback).
+function corsHeaders(origin: string | null): Record<string, string> {
+  if (origin) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+      Vary: "Origin",
+    }
+  }
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+  }
+}
 
 function corsResponse(
   body: unknown,
+  origin: string | null,
   init: ResponseInit = {},
 ): NextResponse {
   return NextResponse.json(body, {
     ...init,
-    headers: { ...CORS_HEADERS, ...init.headers },
+    headers: { ...corsHeaders(origin), ...init.headers },
   })
 }
 
-export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+export async function OPTIONS(req: NextRequest): Promise<NextResponse> {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders(req.headers.get("origin")),
+  })
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const origin = req.headers.get("origin")
+
   const contentLength = req.headers.get("content-length")
   if (contentLength && parseInt(contentLength, 10) > MAX_BODY_BYTES) {
     return corsResponse(
       { error: "payload_too_large", maxBytes: MAX_BODY_BYTES },
+      origin,
       { status: 413 },
     )
   }
@@ -50,11 +78,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     raw = await req.text()
   } catch {
-    return corsResponse({ error: "cannot_read_body" }, { status: 400 })
+    return corsResponse({ error: "cannot_read_body" }, origin, { status: 400 })
   }
   if (raw.length > MAX_BODY_BYTES) {
     return corsResponse(
       { error: "payload_too_large", maxBytes: MAX_BODY_BYTES },
+      origin,
       { status: 413 },
     )
   }
@@ -63,13 +92,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     json = JSON.parse(raw)
   } catch {
-    return corsResponse({ error: "invalid_json" }, { status: 400 })
+    return corsResponse({ error: "invalid_json" }, origin, { status: 400 })
   }
 
   const parsed = trackingPacketSchema.safeParse(json)
   if (!parsed.success) {
     return corsResponse(
       { error: "invalid_payload", issues: parsed.error.issues },
+      origin,
       { status: 400 },
     )
   }
@@ -81,7 +111,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     select: { id: true, domain: true, isDemo: true },
   })
   if (!site) {
-    return corsResponse({ error: "unknown_site" }, { status: 401 })
+    return corsResponse({ error: "unknown_site" }, origin, { status: 401 })
   }
 
   // Serverside validation packet.targetId. Клиенту НЕ доверяем — он мог
@@ -133,7 +163,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       "[tracking] Object Storage write failed:",
       (err as Error).message,
     )
-    return corsResponse({ error: "storage_failed" }, { status: 503 })
+    return corsResponse({ error: "storage_failed" }, origin, { status: 503 })
   }
 
   // Session в PostgreSQL. См. DECISIONS 2026-05-08 / plans/
@@ -205,6 +235,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     )
     return corsResponse(
       { error: "session_transaction_failed" },
+      origin,
       { status: 500 },
     )
   }
@@ -221,6 +252,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   return corsResponse(
     { ok: true, accepted: packet.events.length },
+    origin,
     { status: 200 },
   )
 }

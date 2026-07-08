@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { trackingPacketSchema } from "@/lib/tracking-schema"
-import { prisma } from "@/lib/prisma"
+import { prisma, withDbRetry, isTransientDbError } from "@/lib/prisma"
 import { putJson } from "@/lib/storage"
 import { hashIp, extractClientIp } from "@/lib/ip-hash"
 
@@ -106,10 +106,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const packet = parsed.data
 
-  const site = await prisma.site.findUnique({
-    where: { trackingToken: packet.siteToken },
-    select: { id: true, domain: true, isDemo: true },
-  })
+  const sessionTail = packet.sessionToken.slice(-4)
+
+  let site: { id: string; domain: string; isDemo: boolean } | null
+  try {
+    site = await withDbRetry(() =>
+      prisma.site.findUnique({
+        where: { trackingToken: packet.siteToken },
+        select: { id: true, domain: true, isDemo: true },
+      }),
+    )
+  } catch (err) {
+    const e = err as Error
+    console.error(
+      "[tracking] site.findUnique DB " +
+        (isTransientDbError(err) ? "retry exhausted" : "error") +
+        " sessionTail=..." + sessionTail +
+        " err=" + e.name + ":" + e.message,
+    )
+    return corsResponse({ error: "db_unavailable" }, origin, { status: 503 })
+  }
   if (!site) {
     return corsResponse({ error: "unknown_site" }, origin, { status: 401 })
   }
@@ -126,10 +142,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // (юзер запустил анализ) — in-flight сессия должна дописаться.
   let validatedTargetId: string | null = null
   if (packet.targetId) {
-    const target = await prisma.analysisTarget.findUnique({
-      where: { id: packet.targetId },
-      select: { id: true, siteId: true, archivedAt: true },
-    })
+    let target:
+      | { id: string; siteId: string; archivedAt: Date | null }
+      | null
+    try {
+      target = await withDbRetry(() =>
+        prisma.analysisTarget.findUnique({
+          where: { id: packet.targetId! },
+          select: { id: true, siteId: true, archivedAt: true },
+        }),
+      )
+    } catch (err) {
+      const e = err as Error
+      console.error(
+        "[tracking] target.findUnique DB " +
+          (isTransientDbError(err) ? "retry exhausted" : "error") +
+          " sessionTail=..." + sessionTail +
+          " err=" + e.name + ":" + e.message,
+      )
+      return corsResponse({ error: "db_unavailable" }, origin, { status: 503 })
+    }
     if (target && target.siteId === site.id && target.archivedAt === null) {
       validatedTargetId = target.id
     } else {
@@ -188,7 +220,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const ipHash = hashIp(extractClientIp(req))
 
   try {
-    await prisma.$transaction(async (tx) => {
+    // withDbRetry вокруг ВСЕЙ транзакции: при разрыве TCP до commit'а
+    // сервер откатит транзакцию, повтор безопасно создаст с нуля.
+    // При разрыве ПОСЛЕ commit'а (клиент не получил ack) — createMany
+    // с skipDuplicates во втором вызове увидит уже созданный row →
+    // count=0 → isFirstPacket=false → sessionsCollected НЕ инкрементится
+    // повторно (гейт `isFirstPacket && validatedTargetId`). Порядок
+    // счётчика target'а корректен независимо от повтора.
+    // Известный компромисс: eventsCount может удвоиться в edge-case
+    // post-commit disconnect'а (session уже создана с
+    // eventsCount=packet.events.length, повтор пойдёт в
+    // SUBSEQUENT-ветку с increment); задокументировано как acceptable
+    // в DECISIONS 2026-05-03. Не блокер, sessionsCollected приоритет.
+    await withDbRetry(() => prisma.$transaction(async (tx) => {
       const created = await tx.session.createMany({
         data: [
           {
@@ -252,16 +296,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           })
         }
       }
-    })
+    }))
   } catch (err) {
+    const e = err as Error
+    const transient = isTransientDbError(err)
     console.error(
-      "[tracking] Session transaction failed:",
-      (err as Error).message,
+      "[tracking] Session transaction " +
+        (transient ? "retry exhausted" : "failed") +
+        " sessionTail=..." + sessionTail +
+        " err=" + e.name + ":" + e.message,
     )
     return corsResponse(
-      { error: "session_transaction_failed" },
+      { error: transient ? "db_unavailable" : "session_transaction_failed" },
       origin,
-      { status: 500 },
+      { status: transient ? 503 : 500 },
     )
   }
 

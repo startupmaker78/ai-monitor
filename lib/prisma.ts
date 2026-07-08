@@ -52,3 +52,44 @@ function createLazyPrisma(): PrismaClient {
 }
 
 export const prisma = createLazyPrisma()
+
+// Транзиентный сбой pg-транспорта: Yandex Managed PostgreSQL закрывает
+// idle TCP-соединения, а Prisma-singleton держит их в пуле как «живые».
+// Первый запрос после idle тянет мёртвое → pg кидает
+// "Connection terminated unexpectedly" / "Server has closed the
+// connection" / ECONNRESET / Prisma P1001/P1017. После первого throw'а
+// pool выбрасывает битое соединение — следующий вызов идёт через
+// свежее. Значит 1 узкий retry прозрачно лечит проблему; ретраить
+// больше нельзя (замаскируем реальный DB-даун).
+//
+// Взято 1-в-1 из app/api/tracking/should-record/route.ts, где паттерн
+// уже отработал. TODO: переключить should-record на этот общий хелпер
+// и удалить локальный дубль.
+const TRANSIENT_MARKERS = [
+  "Connection terminated unexpectedly",
+  "Server has closed the connection",
+  "ECONNRESET",
+]
+const TRANSIENT_CODES = new Set(["P1001", "P1017", "ECONNRESET"])
+
+export function isTransientDbError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false
+  const e = err as { message?: string; code?: string }
+  if (e.code && TRANSIENT_CODES.has(e.code)) return true
+  if (e.message) {
+    for (const m of TRANSIENT_MARKERS) {
+      if (e.message.includes(m)) return true
+    }
+  }
+  return false
+}
+
+export async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    if (!isTransientDbError(err)) throw err
+    await new Promise((r) => setTimeout(r, 120))
+    return await fn()
+  }
+}

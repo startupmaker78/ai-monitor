@@ -141,7 +141,7 @@ export function TargetsClient(props: Props) {
                 type="number"
                 min={props.minSessionsBudget}
                 max={props.sessionsRemaining}
-                step={50}
+                step={1}
                 defaultValue={props.minSessionsBudget}
                 required
                 disabled={!canCreate}

@@ -157,7 +157,7 @@ export class EventBuffer {
 
   private handleVisibilityChange = (): void => {
     if (document.visibilityState === 'hidden') {
-      this.flushFinal()
+      this.flush()
     }
   }
 

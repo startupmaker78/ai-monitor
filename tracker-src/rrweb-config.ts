@@ -3,6 +3,7 @@ import { record } from '@rrweb/record'
 type RecordConfig = NonNullable<Parameters<typeof record>[0]>
 
 export const recordConfig: Omit<RecordConfig, 'emit'> = {
+  recordAfter: 'DOMContentLoaded',
   maskAllInputs: false,
   maskInputOptions: {
     password: true,

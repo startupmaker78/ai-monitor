@@ -54,7 +54,27 @@ export class EventBuffer {
   add(event: unknown): void {
     // rrweb's record() emits objects with at least {type, data, timestamp}.
     // Trusted source — the rrweb library contract is the boundary.
-    this.events.push(event as RrwebEventLike)
+    const e = event as RrwebEventLike
+    if (e.type === 2) {
+      // FullSnapshot (type 2) реального сайта academy весит ~2.9 MB —
+      // если он уляжется в один пакет с сопутствующими инкрементами,
+      // тело перевалит MAX_BODY_BYTES=3 MiB на collect и обрежется до
+      // контейнера с 413. Изолируем снапшот в свой пакет:
+      //  1) сначала flush уже накопленных events (закрываем текущий
+      //     пакет как есть) — так снапшот не смешается с довеском;
+      //  2) в опустевший буфер кладём сам FullSnapshot;
+      //  3) немедленно flush — снапшот уходит одиночным пакетом.
+      // Meta (type 4) rrweb эмитит чуть раньше FullSnapshot тем же
+      // takeFullSnapshot и она успевает осесть в буфере; шаг 1 её
+      // вытолкнет вместе с предыдущими. Порядок Meta→FullSnapshot
+      // сохраняется через монотонный packetIndex, склеивать их в один
+      // пакет не нужно.
+      if (this.events.length > 0) this.flush()
+      this.events.push(e)
+      this.flush()
+      return
+    }
+    this.events.push(e)
     if (this.events.length >= MAX_EVENTS_BEFORE_FLUSH) {
       this.flush()
     }

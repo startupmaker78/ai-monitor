@@ -222,10 +222,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       if (isFirstPacket && validatedTargetId) {
-        await tx.analysisTarget.update({
+        const updated = await tx.analysisTarget.update({
           where: { id: validatedTargetId },
           data: { sessionsCollected: { increment: 1 } },
+          select: {
+            sessionsCollected: true,
+            sessionsBudget: true,
+            status: true,
+          },
         })
+
+        // Budget filled → цель становится analysable. Гейт `status:
+        // "ACTIVE"` внутри updateMany делает переход атомарно-once:
+        // если другая параллельная транзакция уже flipла в READY (или
+        // юзер вручную запустил анализ и цель уже ANALYZING/COMPLETED),
+        // count вернётся 0 — no-op. updateMany вместо update, потому
+        // что `{id, status}` — non-unique compound, Prisma update
+        // такой where не принимает.
+        //
+        // Логика восстанавливает поведение, потерянное с удалением
+        // matcher'а в pivot 2026-07-07 (record-only-on-target).
+        if (
+          updated.status === "ACTIVE" &&
+          updated.sessionsCollected >= updated.sessionsBudget
+        ) {
+          await tx.analysisTarget.updateMany({
+            where: { id: validatedTargetId, status: "ACTIVE" },
+            data: { status: "READY" },
+          })
+        }
       }
     })
   } catch (err) {

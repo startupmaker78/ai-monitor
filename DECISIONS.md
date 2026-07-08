@@ -669,6 +669,19 @@ Subscription.sessionsCollected к тарифным лимитам (эта мод
 отдельная таблица SessionPacketReceipt с UNIQUE (sessionToken,
 packetIndex), `INSERT ... ON CONFLICT DO NOTHING`.
 
+**Update 2026-07-08:** collect route получил transient DB retry
+(withDbRetry, 1 повтор на разрыве pg-соединения) — см. запись
+«collect: transient DB retry» ниже. Это ПОВЫСИЛО частоту сценария
+двойного eventsCount: разрыв между `COMMIT` и получением ACK клиентом
+Prisma → повтор `$transaction` попадает в SUBSEQUENT-ветку
+(createMany count=0, session уже существует), которая делает
+`update({eventsCount: {increment: len}})` поверх уже установленного
+в create `eventsCount = len`. sessionsCollected при этом не
+дублируется (гейт `isFirstPacket && validatedTargetId`). Косметика в
+telemetry-поле по-прежнему acceptable, но учесть, что теперь
+триггерится не только клиентским network-retry (у нас нет), но и
+серверным withDbRetry на редком post-commit disconnect'е.
+
 ---
 
 ## 2026-05-03 — analysisTarget matching полагается на синхронизированные клиентские часы (acceptable)
@@ -1144,3 +1157,64 @@ AnalysisTarget URLs владельца.
 4. **`yc serverless trigger get` всегда выводит CRON_SECRET в `payload`** (plaintext). Маскировать через `--format json | jq 'del(.timer.invoke_container_with_retry.payload, .rule.timer.invoke_container_with_retry.payload)'` (поле дублируется в `.timer` и `.rule.timer`).
 
 **Урок на архитектурном уровне:** debug staging-инфраструктуры через CLI без structured-observability (Grafana/dashboard для invocations + error rate триггеров) приводит к ложным тревогам и трате времени на расследование. После MVP — поднять Yandex Monitoring dashboard с метриками триггеров (`trigger.invocations`, `trigger.errors`) чтобы за один взгляд видеть, тикает ли cron.
+
+---
+
+## 2026-07-08 — Трекер: изоляция FullSnapshot + фиксы порядка эмита
+
+**Контекст:** сессии academy.nolim.cc отдавали в S3 только packet idx=1..7 (только type=3 IncrementalSnapshot, ни одного FullSnapshot type=2, ни одного Meta type=4). Плеер = белый экран (нет initial DOM). Замерили FullSnapshot реального сайта — **~2.92 MB**, что при склейке с сопутствующими инкрементами (200/packet) уверенно превышало `MAX_BODY_BYTES=3 MiB` на collect → 413 от YC-платформы **до контейнера** (в контейнерных логах ничего). Отсёкся именно первый packet.
+
+**Решение** — стек из трёх клиентских правок в `tracker-src/`:
+
+1. **`buffer.ts` handleVisibilityChange: `flushFinal()` → `flush()`** — visibilitychange (переключение вкладки в background) больше не финализирует сессию. Раньше `flushFinal` защёлкивал `finalSent=true` навсегда → любое tab-switching до первого FullSnapshot убивало сессию. Финал теперь **только на pagehide**. Побочка задокументирована в TODO (проверить надёжность).
+
+2. **`rrweb-config.ts` recordAfter: `'DOMContentLoaded'`** — снимает дефолт rrweb 'load'. Если `record()` вызвана при `readyState==='loading'` (а у нас — после `await checkShouldRecord`), FullSnapshot не откладывается до `window.load`, а срабатывает сразу после DCL. Commit `e85e056`, revision `bba9p56v159c90k2gr2m`.
+
+3. **`buffer.ts add() — изоляция FullSnapshot**: любой event с `type===2` уходит собственным packet'ом (закрыть накопленное `flush()` → push snapshot → немедленный `flush()`). Meta type=4 rrweb эмитит чуть раньше FullSnapshot тем же takeFullSnapshot и она осядет в предыдущем flushed packet'е — порядок Meta→FullSnapshot по packetIndex сохраняется. Изоляция также покрывает periodic snapshots от `checkoutEveryNms=5min`. Commit `ca5f4e7`, revision `bbae67mgqpdr36aossfh`.
+
+**Почему изоляция, а не chunking:** chunking rrweb-events через границу packet'а перегружает клиент и требует reassembly на плеере. Изоляция дешевле — один event в packet, тело ~= размер snapshot'а. FullSnapshot 2.92 MB укладывается в 3 MiB cap **без запаса** (93% cap); при росте контента academy — снова 413. Долгосрочный фикс — gzip тела (см. TODO P1).
+
+---
+
+## 2026-07-08 — should-record: try/catch + transient DB retry, 503 вместо uncaught 500
+
+**Контекст:** роут `GET /api/tracking/should-record` при первом запросе после idle/cold-start контейнера отдавал **HTTP 500 без CORS-заголовков**. Клиентский трекер fail-closed → запись не стартует, юзер не понимает почему. Единственная ошибка в container-логах: `Error: Connection terminated unexpectedly` — pg driver, stale connection в Prisma-пуле (Yandex Managed PostgreSQL рубит idle TCP, singleton держит их как «живые»). Роут был **без try/catch**.
+
+**Решение:** локальный `withDbRetry<T>` + предикат `isTransientDbError` в самом файле роута. Транзиентные маркеры message: `Connection terminated unexpectedly`, `Server has closed the connection`, `ECONNRESET`. Транзиентные codes: `P1001`, `P1017`, `ECONNRESET`. Логика — **ровно 1 повтор** после ~120ms sleep; non-transient сразу пробрасывается; повтор не помог → catch отдаёт **HTTP 503 `{record:false, reason:"db_unavailable"}` + CORS** (не 500, не заглушенный 200).
+
+**Почему 1 повтор:** первый throw заставляет pg-pool выбросить битое соединение — второй вызов идёт через свежее. Больше не ретраить, иначе замаскируем реальный DB-даун (не 5xx на сотнях запросов). Логика идентична собранной ниже в `lib/prisma.ts` — TODO переключить.
+
+Commit `d984479`, revision `bbatbr6p699b3n1ms3uo`.
+
+---
+
+## 2026-07-08 — collect: transient DB retry через общий withDbRetry в lib/prisma.ts
+
+**Контекст:** collect route имел try/catch, но БЕЗ retry — при stale-connection первый packet сессии терялся (503 → sendPacket dropped на клиенте, без ретрая клиента). Для packet 0 (со снапшотом ~2.9 MB) это = непроигрываемая сессия / белый плеер.
+
+**Решение:**
+1. `withDbRetry` и `isTransientDbError` вынесены в `lib/prisma.ts` (взяты 1-в-1 из should-record).
+2. Применены в collect к трём точкам обращения к БД: `prisma.site.findUnique`, `prisma.analysisTarget.findUnique`, `prisma.$transaction(...)`.
+3. При retry-exhausted transient → **HTTP 503 `{error:"db_unavailable"}` + CORS**. При non-transient (валидация Prisma, foreign-key и т.п.) — прежний **HTTP 500 `session_transaction_failed`**.
+
+**Идемпотентность транзакции при post-commit disconnect'е** (запрошено при review):
+- `sessionsCollected` — **safe**. При повторе createMany с `skipDuplicates:true` находит уже созданный row → `count=0` → `isFirstPacket=false` → блок инкремента `sessionsCollected` **пропущен**. Счётчик не дублируется даже при повторе после commit'а.
+- `eventsCount` — **удвоится в редком edge-case** (post-commit disconnect'е): первая транзакция уже установила `eventsCount = packet.events.length` в create, повтор пойдёт в SUBSEQUENT-ветку и добавит ещё один `increment`. Это тот же самый механизм, что зафиксирован 2026-05-03 как acceptable — telemetry-поле, а не billing. Крестной ссылкой указано в записи 2026-05-03 (см. Update 2026-07-08).
+
+Commit `533e056`, revision `bba6ldkgm14ps91j02mf`.
+
+---
+
+## 2026-07-08 — Данные: архив overshoot-target, чистая цель для теста
+
+**Контекст:** should-record матчит `analysisTarget.findMany({...archivedAt: null, status IN [ACTIVE, READY]})` с `orderBy: createdAt asc`, затем **линейный `for...of` + `break` на первом совпадении** по `normalizeUrl`, и **только после выбора** проверяет `sessionsCollected >= sessionsBudget` → `budget_exhausted`. При двух active/ready на одном URL берётся **старейшая**; если она переполнена — новая цель никогда не будет выбрана.
+
+Улика overshoot: target `cmrbt0a4j00002w3cp4smnhcs` (academy.nolim.cc/) `sessionsCollected=6, sessionsBudget=5` (статус READY, но auto-transition сработал на первом же превышении, а concurrent старты продолжили инкрементить дальше — см. TODO P2 overshoot).
+
+**Решение:**
+- `cmrbt0a4j00002w3cp4smnhcs` заархивирован (`archivedAt = 2026-07-08T16:57:53Z`). Улика 6/5 **сохранена** (status/counters не тронуты) — нужна для последующего разбора overshoot-бага.
+- Создана чистая цель `cmrcbpgcs0000o1lbihsba88g`: `url=https://academy.nolim.cc/`, `name="Главная"`, `status=ACTIVE`, `sessionsBudget=20`, `sessionsCollected=0`, `archivedAt=null` (сейчас 3/20 — реальные тестовые сессии).
+
+**Почему архив, а не поднятие budget'а у переполненного target'а:** сохраняем улику для расследования overshoot. Изменение budget затирает контекст «сколько успело просочиться» — забыл бы, кто был кто.
+
+**Долгосрочно** should-record нужно поправить: гейт budget внутри цикла матча + `continue` на переполненных → возвращать первую **непереполненную** цель. Тогда добавление новой цели не требует ручного архива старой. Занесено в TODO как более крупный refactor.

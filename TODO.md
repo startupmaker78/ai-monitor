@@ -177,3 +177,71 @@
   требует bun >=1.3.6 / node >=22.0.0, у нас node 20.20.2.
   Игнорируем (это transitive), но проверить — не используется ли
   где-то.
+
+## Сессия 2026-07-08 (перенос в основные секции по мере разбора)
+
+**[P1 — завтра] gzip тела снапшота на collect.** FullSnapshot academy.
+nolim.cc = ~2.92 MB (93% cap 3 MiB). Изоляция snapshot'а в свой
+packet (commit ca5f4e7) спасает СЕГОДНЯ, но при росте контента —
+снова 413 от YC-платформы до контейнера. Долгосрочный фикс: gzip.
+Скоуп: клиент — `CompressionStream('gzip')` перед fetch/beacon +
+`Content-Encoding: gzip` header; collect route — детект по header,
+разжатие в `req.text()`, fallback для старого tracker.js без gzip
+(backward compat). Побочная выгода: минус трафик клиента + минус
+байт в S3 (packet.json сохраняется уже разжатый — оставить как
+сейчас, gzip только на transport). См. DECISIONS 2026-07-08 «Трекер
+изоляция FullSnapshot».
+
+**[P2] Overshoot sessionsCollected.** Инкремент `sessionsCollected`
+в collect транзакции не гейтится статусом цели: при N параллельных
+первых packet'ах на почти-полной цели каждый успевает пройти
+инкремент через свою transaction, пока auto-transition ACTIVE→READY
+срабатывает только у одного (гейт `status="ACTIVE"` в updateMany
+защищает переход, но не инкремент). Итог: budget пробивается на
+`N-1` сессий выше предела. Улика — target
+`cmrbt0a4j00002w3cp4smnhcs`: `6/5`, архивирован для расследования.
+Фикс на выбор:
+  (а) инкремент через updateMany с `where: {id, status: "ACTIVE"}` —
+      concurrent старты после transition пропустятся;
+  (б) явная проверка `sessionsCollected < sessionsBudget` перед
+      инкрементом внутри той же транзакции — race-safe при row-lock
+      на update.
+См. DECISIONS 2026-07-08 «Данные: архив overshoot-target».
+
+**[P2] eventsCount не идемпотентен на retry — участилось.** Известно
+с DECISIONS 2026-05-03 как acceptable (telemetry-поле, а не billing).
+ВНИМАНИЕ: сегодняшний collect retry (commit 533e056, `withDbRetry`
+вокруг `$transaction`) ПОВЫСИЛ частоту сценария: разрыв pg-соединения
+между `COMMIT` и получением ACK клиентом Prisma → повтор попадает в
+SUBSEQUENT-ветку (createMany count=0, session уже создана в БД) и
+делает `update({eventsCount: {increment: len}})` поверх уже
+установленного в create `eventsCount = len`. Двойной счёт для
+этого packet'а. `sessionsCollected` при этом чист (гейт
+`isFirstPacket && validatedTargetId`). Косметика в счётчике
+дашборда, редкая, но при разборе учесть контекст retry.
+
+**[P2] should-record: переключить на общий `withDbRetry`/
+`isTransientDbError` из lib/prisma.ts.** Сейчас там локальный дубль
+(~40 строк) — идентичная логика, взятая при выносе в общий helper
+1-в-1. Маленький PR, чисто рефакторинг: `import { withDbRetry,
+isTransientDbError } from "@/lib/prisma"`, удалить локальные
+`TRANSIENT_MARKERS/TRANSIENT_CODES/isTransientDbError/withDbRetry` из
+`app/api/tracking/should-record/route.ts`. Оставили дубль сегодня
+потому что should-record уже работал — не хотели трогать зелёное.
+
+**[P2] Финализация сессии стала полагаться только на pagehide + cron.**
+Побочка фикса 1a (commit ca5f4e7): `handleVisibilityChange` больше не
+финализирует (иначе tab-switching убивал сессию до FullSnapshot).
+Теперь `endedAt` устанавливается либо через sendBeacon sentinel на
+pagehide (ненадёжен: iOS Safari часто отбрасывает), либо через cron
+`/api/cron/finalize-stale-sessions`. Проверить надёжность на реальном
+трафике: если > X% сессий финализируются только через cron —
+рассмотреть beacon-флаш без защёлки `finalSent` (позволить sentinel
+уходить несколько раз через жизнь сессии, серверный upsert
+идемпотентен). См. DECISIONS 2026-07-08 «Трекер изоляция FullSnapshot»,
+пункт 1.
+
+**[перед релизом MVP] Site tracking token e464... мелькал в curl/
+логах.** Staging, не критично, но добавляем в общий список ротации
+креды перед выходом в prod. Прочие уже известные утечки — см. секцию
+«Безопасность» выше.

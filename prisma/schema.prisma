@@ -160,10 +160,27 @@ model Session {
   storageKey       String?
   analysisTargetId String?
   analysisTarget   AnalysisTarget? @relation(fields: [analysisTargetId], references: [id], onDelete: SetNull)
+  receipts         SessionPacketReceipt[]
 
   @@index([siteId, startedAt])
   @@index([startedAt])
   @@index([analysisTargetId])
+}
+
+// Дедуп-квитанции обработанных пакетов: одна строка на (sessionToken,
+// packetIndex). Составной PK делает пару уникальной → INSERT ON CONFLICT
+// DO NOTHING в collect гейтит инкремент eventsCount ровно один раз на
+// пакет (идемпотентность при retry / двойном beacon / гонке). Каскад по
+// Session.sessionToken (@unique) авто-чистит квитанции при удалении
+// сессии (retention-cron, удаление сайта) — сирот не остаётся.
+model SessionPacketReceipt {
+  sessionToken String
+  packetIndex  Int
+  createdAt    DateTime @default(now())
+  session      Session  @relation(fields: [sessionToken], references: [sessionToken], onDelete: Cascade)
+
+  @@id([sessionToken, packetIndex])
+  @@index([sessionToken])
 }
 
 model AnalysisTarget {

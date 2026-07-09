@@ -259,15 +259,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // record-only-on-target-plan.md C.3 — атомарный createMany +
   // skipDuplicates + branching:
   //   FIRST packet (createMany.count === 1):
-  //     — Session row создан с eventsCount = packet.events.length,
+  //     — Session row создан с eventsCount = 0 (счётчик наполняется
+  //       ниже через receipt-гейт единообразно для всех пакетов),
   //       analysisTargetId = validatedTargetId,
   //       endedAt = packet.isFinal ? now : null
-  //     — Если есть validatedTargetId → инкремент sessionsCollected
-  //       (ровно один раз за жизнь сессии)
+  //     — Если есть validatedTargetId → атомарный conditional инкремент
+  //       sessionsCollected (ровно один раз за жизнь сессии)
   //   SUBSEQUENT packet (count === 0):
-  //     — Session уже существует, обновляем eventsCount (increment) и
-  //       опционально endedAt (если isFinal). analysisTargetId
-  //       immutable — targetId, попавший в create, остаётся навсегда.
+  //     — Session уже существует; endedAt обновляется при isFinal.
+  //       analysisTargetId immutable.
+  //   eventsCount (любой пакет): идемпотентно через SessionPacketReceipt
+  //     — increment ровно один раз на (sessionToken, packetIndex).
   //
   // Race двух concurrent packets того же sessionToken разруливается
   // unique-constraint на Session.sessionToken (@unique в schema).
@@ -282,13 +284,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // При разрыве ПОСЛЕ commit'а (клиент не получил ack) — createMany
     // с skipDuplicates во втором вызове увидит уже созданный row →
     // count=0 → isFirstPacket=false → sessionsCollected НЕ инкрементится
-    // повторно (гейт `isFirstPacket && validatedTargetId`). Порядок
-    // счётчика target'а корректен независимо от повтора.
-    // Известный компромисс: eventsCount может удвоиться в edge-case
-    // post-commit disconnect'а (session уже создана с
-    // eventsCount=packet.events.length, повтор пойдёт в
-    // SUBSEQUENT-ветку с increment); задокументировано как acceptable
-    // в DECISIONS 2026-05-03. Не блокер, sessionsCollected приоритет.
+    // повторно (гейт `isFirstPacket && validatedTargetId`). eventsCount
+    // тоже идемпотентен: receipt для packetIndex уже вставлен на первой
+    // попытке (commit'нут) → ON CONFLICT → 0 → increment пропускается.
+    // Двойного счёта на retry больше нет.
     await withDbRetry(() => prisma.$transaction(async (tx) => {
       const created = await tx.session.createMany({
         data: [
@@ -299,7 +298,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             userAgent: packet.userAgent,
             startedAt: startedAtDate,
             endedAt: packet.isFinal ? nowDate : null,
-            eventsCount: packet.events.length,
+            // eventsCount наполняется ниже через receipt-гейт единообразно
+            // для всех пакетов (в т.ч. первого) — здесь 0, чтобы первый
+            // пакет не задвоился (create + receipt-increment).
+            eventsCount: 0,
             storageKey: prefix,
             analysisTargetId: validatedTargetId,
           },
@@ -309,16 +311,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       const isFirstPacket = created.count === 1
 
-      if (!isFirstPacket) {
-        // TODO: eventsCount increment всё ещё не идемпотентен на retry
-        // одного packetIndex (DECISIONS 2026-05-03 «acceptable»).
-        // Проблема out of scope этого коммита.
+      // Идемпотентность eventsCount по (sessionToken, packetIndex) через
+      // SessionPacketReceipt (@@id[sessionToken, packetIndex]). INSERT ON
+      // CONFLICT DO NOTHING атомарен на уровне PK: впервые встреченный
+      // packetIndex вставляется (rowsAffected=1); повтор (retry после
+      // commit / двойной beacon / параллельный дубль) конфликтует →
+      // rowsAffected=0. FK на Session(sessionToken) удовлетворён: session
+      // создана выше в этой же tx (первый пакет) либо уже существует.
+      const receiptInserted = await tx.$executeRaw`
+        INSERT INTO "SessionPacketReceipt" ("sessionToken", "packetIndex")
+        VALUES (${packet.sessionToken}, ${packet.packetIndex})
+        ON CONFLICT DO NOTHING
+      `
+
+      // Один session.update: eventsCount инкрементим ТОЛЬКО если пакет
+      // впервые учтён (receiptInserted === 1); endedAt ставим для
+      // subsequent-финала (на первом пакете endedAt уже в createMany).
+      const sessionUpdate: {
+        eventsCount?: { increment: number }
+        endedAt?: Date
+      } = {}
+      if (receiptInserted === 1) {
+        sessionUpdate.eventsCount = { increment: packet.events.length }
+      }
+      if (!isFirstPacket && packet.isFinal) {
+        sessionUpdate.endedAt = nowDate
+      }
+      if (sessionUpdate.eventsCount || sessionUpdate.endedAt) {
         await tx.session.update({
           where: { sessionToken: packet.sessionToken },
-          data: {
-            eventsCount: { increment: packet.events.length },
-            ...(packet.isFinal ? { endedAt: nowDate } : {}),
-          },
+          data: sessionUpdate,
         })
       }
 

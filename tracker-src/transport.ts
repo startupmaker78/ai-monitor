@@ -24,21 +24,6 @@ function getCollectUrl(): string {
 
 const COLLECT_URL = getCollectUrl()
 
-// gzip the packet JSON in the browser via the streams-based
-// CompressionStream API. FullSnapshot of a real Tilda page is ~2.9 MB of
-// text/HTML — it compresses several-fold, keeping the wire body well under
-// the 3.5 MiB Yandex Serverless proxy limit (verified: the limit is
-// measured on the COMPRESSED body; neither API Gateway nor the container
-// proxy decompress Content-Encoding:gzip). Returns a Blob of gzip bytes
-// (unambiguous BodyInit; fetch takes Content-Type from our explicit
-// header, not the Blob). Caller feature-detects CompressionStream first.
-async function gzipJson(json: string): Promise<Blob> {
-  const stream = new Blob([json])
-    .stream()
-    .pipeThrough(new CompressionStream('gzip'))
-  return await new Response(stream).blob()
-}
-
 // Returns true if the packet was accepted by the server (HTTP 2xx),
 // false on any failure (network error, fetch TypeError, HTTP 4xx/5xx).
 // Caller (EventBuffer) increments a session-level dropped-packets counter
@@ -55,35 +40,12 @@ export async function sendPacket(packet: Packet): Promise<boolean> {
   // is healthy, and if it fails the next interval will retry-by-
   // accumulation. The unload path is covered separately by
   // sendFinalPacket → sendBeacon below.
-  const json = JSON.stringify(packet)
-
-  // Default: uncompressed body (old-browser path + gzip-failure fallback).
-  let body: BodyInit = json
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  let bodySize = json.length
-
-  // Feature-detect CompressionStream: absent in Safari <16.4, Firefox
-  // <113, Chrome <80. When unavailable we send plain JSON exactly as
-  // before — the collect route accepts both (branches on Content-Encoding).
-  if (typeof CompressionStream !== 'undefined') {
-    try {
-      const gz = await gzipJson(json)
-      body = gz
-      headers['Content-Encoding'] = 'gzip'
-      // Log the real wire size (compressed bytes), not the JSON length.
-      bodySize = gz.size
-    } catch {
-      // gzip failed for any reason — fall back to uncompressed so we
-      // never drop a packet over a compression hiccup. body/headers/
-      // bodySize stay at their plain-JSON defaults above.
-    }
-  }
-
+  const bodySize = JSON.stringify(packet).length
   try {
     const response = await fetch(COLLECT_URL, {
       method: 'POST',
-      headers,
-      body,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(packet),
       credentials: 'omit',
     })
     if (!response.ok) {

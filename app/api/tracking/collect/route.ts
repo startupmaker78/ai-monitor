@@ -323,29 +323,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       if (isFirstPacket && validatedTargetId) {
-        const updated = await tx.analysisTarget.update({
-          where: { id: validatedTargetId },
-          data: { sessionsCollected: { increment: 1 } },
-          select: {
-            sessionsCollected: true,
-            sessionsBudget: true,
-            status: true,
-          },
-        })
-
-        // Budget filled → цель становится analysable. Гейт `status:
-        // "ACTIVE"` внутри updateMany делает переход атомарно-once:
-        // если другая параллельная транзакция уже flipла в READY (или
-        // юзер вручную запустил анализ и цель уже ANALYZING/COMPLETED),
-        // count вернётся 0 — no-op. updateMany вместо update, потому
-        // что `{id, status}` — non-unique compound, Prisma update
-        // такой where не принимает.
+        // Атомарный conditional increment sessionsCollected. Раньше
+        // increment был безусловным (`update {increment:1}`) — при N
+        // параллельных первых пакетах на почти-полной цели каждый
+        // пробивал лимит, budget overshoot'ился на N-1 (улики
+        // cmrbt0a4 6/5, cmrcbpgcs 6/20; DECISIONS/TODO 2026-07-08).
         //
-        // Логика восстанавливает поведение, потерянное с удалением
-        // matcher'а в pivot 2026-07-07 (record-only-on-target).
+        // Column-to-column сравнение `sessionsCollected < sessionsBudget`
+        // недоступно в Prisma fluent API (lt ждёт литерал, не поле),
+        // поэтому raw UPDATE. Postgres берёт row-lock на строку цели →
+        // конкурентные первые пакеты сериализуются; под READ COMMITTED
+        // вторая транзакция после релиза лока перечитывает committed-
+        // строку и заново вычисляет WHERE (EvalPlanQual). Как только
+        // счётчик достиг budget (или статус уже не ACTIVE), условие
+        // ложно → 0 строк → инкремента нет. Окна overshoot нет —
+        // сравнение и запись атомарны под локом.
+        //
+        // `updatedAt = NOW()` вручную: raw UPDATE не триггерит Prisma
+        // @updatedAt (сохраняем прежнее поведение bump'а таймстампа).
+        const bumped = await tx.$queryRaw<
+          Array<{ sessionsCollected: number; sessionsBudget: number }>
+        >`
+          UPDATE "AnalysisTarget"
+          SET "sessionsCollected" = "sessionsCollected" + 1,
+              "updatedAt" = NOW()
+          WHERE "id" = ${validatedTargetId}
+            AND "status" = 'ACTIVE'
+            AND "sessionsCollected" < "sessionsBudget"
+          RETURNING "sessionsCollected", "sessionsBudget"
+        `
+
+        // bumped.length === 1 → инкремент состоялся (цель была ACTIVE и
+        // недобрала budget). Если счётчик достиг budget — переводим
+        // ACTIVE→READY. Гейт status="ACTIVE" в updateMany делает переход
+        // атомарно-once: параллельная транзакция, уже flipнувшая в READY,
+        // получит count=0 (no-op). updateMany вместо update, потому что
+        // `{id, status}` — non-unique compound. Восстанавливает поведение,
+        // потерянное с удалением matcher'а в pivot 2026-07-07.
         if (
-          updated.status === "ACTIVE" &&
-          updated.sessionsCollected >= updated.sessionsBudget
+          bumped.length === 1 &&
+          bumped[0].sessionsCollected >= bumped[0].sessionsBudget
         ) {
           await tx.analysisTarget.updateMany({
             where: { id: validatedTargetId, status: "ACTIVE" },

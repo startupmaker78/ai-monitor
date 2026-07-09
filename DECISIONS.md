@@ -682,6 +682,13 @@ telemetry-поле по-прежнему acceptable, но учесть, что �
 триггерится не только клиентским network-retry (у нас нет), но и
 серверным withDbRetry на редком post-commit disconnect'е.
 
+**Update 2026-07-09 — РЕАЛИЗОВАНО (вариант B).** Предзаложенное здесь
+решение (таблица `SessionPacketReceipt` с UNIQUE (sessionToken,
+packetIndex) + `INSERT ON CONFLICT DO NOTHING`) реализовано —
+eventsCount теперь идемпотентен по пакету. Больше НЕ acceptable-долг,
+а закрыто. См. запись «2026-07-09 — eventsCount идемпотентность
+(вариант B, миграция)» ниже.
+
 ---
 
 ## 2026-05-03 — analysisTarget matching полагается на синхронизированные клиентские часы (acceptable)
@@ -1253,3 +1260,24 @@ Commit `533e056`, revision `bba6ldkgm14ps91j02mf`.
 - **Подтверждено end-to-end из браузера:** collect вернул `{ok:true, accepted:7}`, ноль дропов/fallback.
 
 **Связанное:** изоляция FullSnapshot (2026-07-08) при gzip технически избыточна, но оставлена **намеренно** (снапшот уходит немедленно отдельным пакетом, короткие сессии воспроизводимы) — фича, не долг. См. TODO «Сессия 2026-07-09».
+
+---
+
+## 2026-07-09 — eventsCount идемпотентность (вариант B, миграция)
+
+**Проблема:** `eventsCount += packet.events.length` в SUBSEQUENT-ветке collect не идемпотентен — повтор одного пакета (retry после commit / двойной beacon / гонка) задваивал счётчик. `sessionsCollected` при этом чист (гейт `isFirstPacket && validatedTargetId`). Разведка показала: **в БД негде отследить обработанный (sessionToken, packetIndex)** — rrweb-события лежат только в S3 (`sessions/{siteId}/{sessionToken}/{packetIndex}.json`), в БД лишь `Session`-агрегат. S3 уже идемпотентен по ключу (PutObject перезаписывает). **Чистого фикса без миграции нет:** A (таблица событий в БД) — отмена S3-решения; C (conditional без хранилища индексов) — негде хранить; D (вычислять eventsCount из S3) — дорого/меняет семантику; E (гейт только retry) — частично, не покрывает двойной beacon. Все отклонены.
+
+**Решение — вариант B** (предзаложен в DECISIONS 2026-05-03, теперь реализован): новая таблица `SessionPacketReceipt` — составной PK `(sessionToken, packetIndex)`, FK на `Session.sessionToken` `ON DELETE CASCADE`, индекс по `sessionToken`. В collect внутри той же `$transaction`: `INSERT INTO "SessionPacketReceipt" ... ON CONFLICT DO NOTHING` через `$executeRaw` → `eventsCount` инкрементится **только если receipt вставлен** (`rowsAffected === 1`). **Race-safe через unique-констрейнт PK** — та же природа атомарности, что overshoot-фикс через row-lock: два параллельных одинаковых packetIndex → один выигрывает INSERT, второй `ON CONFLICT → 0` → без двойного инкремента. Покрывает **оба** источника (retry + двойной beacon).
+
+**Первый пакет — вариант (i) (единообразный).** `createMany` создаёт session с `eventsCount = 0`; наполнение идёт единообразно через receipt-гейт для ВСЕХ пакетов (включая первый). Один код-путь для eventsCount = нет щелей. Цена — один лишний крошечный `session.update` на первом пакете (0→len), на фоне createMany+S3+sessionsCollected это шум. RETRY первого пакета: createMany count=0 + receipt(idx) уже вставлен на первой попытке → `ON CONFLICT → 0` → инкремент пропущен, eventsCount не задваивается.
+
+**endedAt — щели нет.** `endedAt` гейтится `!isFirstPacket && packet.isFinal` **НЕЗАВИСИМО** от receipt-гейта (пишется в тот же `session.update`, но по своему условию). Повтор финального пакета: receipt-гейт пропускает eventsCount-инкремент, но `endedAt` всё равно проставляется (условие истинно). Плюс он уже был выставлен первой обработкой. Финализация корректна во всех ветках. Подтверждено тестом: повтор final → eventsCount не растёт (6 не 7), endedAt остаётся set (не null).
+
+**Миграция — ВРУЧНУЮ (важный факт про проект).** `migrate deploy` **НЕ в CI** (ни в deploy.yml, ни в Dockerfile — только `prisma generate`). Миграция применяется руками с локальной машины (`npm run prisma migrate deploy`, `DATABASE_URL` из `.env.local` → staging Yandex Managed PG). Порядок **БД→код**: таблица создаётся ПЕРВОЙ (аддитивный `CREATE TABLE`, на работающий старый контейнер не влияет), иначе новый код падал бы на `INSERT` в несуществующую таблицу. Откат: `DROP TABLE` (аддитивная миграция, данные не тронуты). Коммит миграции в git = для истории/консистентности БД↔репо (CI её не переприменяет). Cleanup: FK `ON DELETE CASCADE` авто-удаляет receipts вместе с сессией (retention-cron `cleanup-old-sessions`, удаление сайта) — retention-джоб не меняли, сирот нет (подтверждено тестом cascade).
+
+**Commits / revisions:**
+- Миграция БД: `20260709224701_add_session_packet_receipt` (применена вручную к staging).
+- Код + миграция + схема: `0ee9dab` → revision `bbabm61mr4tf56f2drr6`.
+- **Подтверждено end-to-end на живом коде:** повтор idx=1 не задваивает eventsCount (5, не 7); повтор final idx=2 сохраняет eventsCount (6, не 7) и endedAt (set); FK cascade удалил receipts вместе с сессией (3→0).
+
+**Связанное:** overshoot sessionsCollected (raw conditional increment, commit `867170f`) и eventsCount (эта запись) используют одну и ту же идею атомарности на уровне строки/констрейнта Postgres вместо read-then-write в app-коде.

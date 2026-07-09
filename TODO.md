@@ -261,23 +261,31 @@ pagehide (ненадёжен: iOS Safari часто отбрасывает), л�
   YC-proxy). Схема, находка про utf8-mangle и урок two-phase deploy —
   см. DECISIONS 2026-07-09 «gzip сжатие тела пакетов».
 
-**Незакрытое (перенос с 2026-07-08, приоритеты):**
+- **[DONE 2026-07-09] should-record → общий `withDbRetry`** (commit
+  `8bc35db`). Убран локальный дубль ~40 строк, используется общий
+  `withDbRetry`/`isTransientDbError` из `lib/prisma.ts` (как collect).
+- **[DONE 2026-07-09] overshoot sessionsCollected** — атомарный
+  conditional increment через raw `UPDATE ... WHERE status='ACTIVE' AND
+  sessionsCollected < sessionsBudget` (row-lock Postgres; commit
+  `867170f`, revision `bba9uje...`). Параллельные первые пакеты больше
+  не пробивают budget (проверено: 2 конкурентных → 2, не 3). См.
+  DECISIONS 2026-07-09.
+- **[DONE 2026-07-09] eventsCount идемпотентность** — вариант B, таблица
+  `SessionPacketReceipt` (составной PK + `INSERT ON CONFLICT`, race-safe;
+  commit `0ee9dab`, миграция `20260709224701`, revision `bbabm61m...`).
+  Повтор пакета (retry / двойной beacon / гонка) не задваивает счётчик;
+  финал-повтор сохраняет endedAt. FK cascade чистит receipts с сессией.
+  См. DECISIONS 2026-07-09 «eventsCount идемпотентность».
 
-- **[P2] overshoot sessionsCollected** — инкремент в collect-транзакции
-  не гейтится статусом цели; при N параллельных первых packet'ах budget
-  пробивается на N-1. Улика `cmrbt0a4j00002w3cp4smnhcs` (6/5,
-  архивирован). Детали и варианты фикса (а/б) — см. секцию 2026-07-08
-  выше + DECISIONS 2026-07-08 «Данные: архив overshoot-target».
-- **[P2] eventsCount не идемпотентен на retry** — collect retry
-  (533e056) участил сценарий двойного счёта. Telemetry-поле, acceptable
-  (DECISIONS 2026-05-03), но при разборе учесть контекст retry.
-- **[P2] should-record → общий `withDbRetry`/`isTransientDbError`** из
-  `lib/prisma.ts`, убрать локальный дубль (~40 строк). Чистый
-  рефакторинг, зелёное трогаем осторожно.
+**Незакрытое:**
+
 - **[P2] финализация: `endedAt` только на pagehide + cron** — побочка
-  фикса visibilitychange (ca5f4e7). Проверить надёжность на реальном
-  трафике; при >X% финализаций только через cron — рассмотреть
-  beacon-флаш без защёлки `finalSent`.
+  фикса visibilitychange (ca5f4e7, 2026-07-08). `endedAt` ставится либо
+  через sendBeacon-sentinel на pagehide (ненадёжен: iOS Safari часто
+  отбрасывает), либо через cron `finalize-stale-sessions`. Проверить
+  надёжность на реальном трафике; при >X% финализаций только через cron
+  — рассмотреть beacon-флаш без защёлки `finalSent`. **Единственный
+  оставшийся содержательный P2.**
 - **[минор] buffer.ts: устаревший комментарий** `MAX_BODY_BYTES=3 MiB`
   ([buffer.ts:61](tracker-src/buffer.ts#L61)) — серверная константа
   переименована в `MAX_WIRE_BYTES`. Косметика в комментарии трекера.

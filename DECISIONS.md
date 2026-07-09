@@ -1218,3 +1218,38 @@ Commit `533e056`, revision `bba6ldkgm14ps91j02mf`.
 **Почему архив, а не поднятие budget'а у переполненного target'а:** сохраняем улику для расследования overshoot. Изменение budget затирает контекст «сколько успело просочиться» — забыл бы, кто был кто.
 
 **Долгосрочно** should-record нужно поправить: гейт budget внутри цикла матча + `continue` на переполненных → возвращать первую **непереполненную** цель. Тогда добавление новой цели не требует ручного архива старой. Занесено в TODO как более крупный refactor.
+
+---
+
+## 2026-07-09 — gzip сжатие тела пакетов (octet-stream + magic-детект)
+
+**Проблема:** FullSnapshot реальной страницы academy.nolim.cc ≈ **2.92 MB** = 93% от collect-cap 3 MiB. Изоляция снапшота в отдельный packet (2026-07-08, commit `ca5f4e7`) спасала на текущем контенте, но при любом росте DOM → снова 413 от YC-платформы **до** контейнера. Цель gzip — снять лимит навсегда + побочно срезать клиентский трафик и байты в S3.
+
+**КЛЮЧЕВАЯ НАХОДКА (поведение YC-платформы):** нельзя слать gzip с заголовком `Content-Encoding: gzip`. Serverless-proxy **контейнера** прогоняет такое тело через UTF-8-нормализацию и заменяет невалидные UTF-8 байты на U+FFFD: байт `0x8b` (второй байт gzip-magic) → `ef bf bd`, тело разрушается безвозвратно. Проверено TEMP эхо-роутом со сравнением sha256 отправленного и принятого:
+- `Content-Encoding: gzip` + `application/json` → sha разошёлся, `first8Hex = 1f efbfbd 08…`, gunzip падает. Природа — **utf8-mangle** (НЕ base64: гипотеза base64 отвергнута, `base64→gunzip` тоже false).
+- тот же gzip как `application/octet-stream` **БЕЗ** `Content-Encoding` → sha совпал, `first8Hex = 1f8b08…`, gunzip ok. **Проходит целым.**
+- Искажает именно **контейнерный proxy**, не API Gateway: container-direct (bypass Gateway) даёт тот же результат.
+- Лимит **3.5 MiB считается по СЖАТОМУ телу на проводе** (эмпирически: сырые 4.77 MB → 413 `ProxyIntegrationError (3670016)`; gzip 4.8 KB с распаковкой в 4.77 MB → проходит). gzip реально помогает против лимита.
+
+**РАБОЧАЯ СХЕМА:**
+- **Клиент** ([tracker-src/transport.ts](tracker-src/transport.ts), `sendPacket`): шлёт `gzip(json)` как `Content-Type: application/octet-stream` **БЕЗ** `Content-Encoding`. Сжатие через `CompressionStream('gzip')`.
+- **Сервер** ([app/api/tracking/collect/route.ts](app/api/tracking/collect/route.ts)): детектит gzip **по magic-байтам** (`buf[0]===0x1f && buf[1]===0x8b`), НЕ по заголовку → `zlib.gunzipSync(buf, { maxOutputLength: MAX_INFLATED_BYTES })`; иначе `buf.toString('utf8')` (plain). Добавлен `export const runtime = "nodejs"`.
+- **Два лимита:** `MAX_WIRE_BYTES = 3 MiB` (входное тело — сжатое или сырое), `MAX_INFLATED_BYTES = 8 MiB` (распакованное). Anti-zip-bomb через `maxOutputLength`: обрывает распаковку на пороге, НЕ аллоцируя весь выход — memory-safe, а не post-hoc проверка.
+- S3 по-прежнему хранит packet.json **разжатым** — gzip только на transport.
+
+**Клиентские страховки:**
+- Feature-detect `CompressionStream` (нет в Safari <16.4, Firefox <113, Chrome <80) → без него plain-путь ровно как раньше.
+- **Fallback на plain при любом не-2xx** ответе на gzip-отправку: ровно **1 повтор** тем же пакетом plain'ом (`application/json`). Если сервер по любой причине не принял gzip — запись не теряется. `sendFinalPacket`/beacon не трогали (sentinel `events=[]` крошечный, уходит plain через beacon).
+
+**Регрессия и урок (two-phase deploy):** первый деплой (commit `ccc856f`) ставил `Content-Encoding: gzip` — сервер отвечал 400 `invalid_encoding`, а клиент **без fallback** дропал пакет → запись сломалась для современных браузеров (у которых `CompressionStream` есть; старые/beacon на plain работали). Откачено revert'ом (`ccc856f` → `1d799f8`), причина найдена эхо-роутом, схема переделана на octet-stream + magic. **Уроки:**
+1. Сервер (принимает и gzip, и plain) деплоить **ПЕРВЫМ**, клиент **ВТОРЫМ**: сервер backward-compat, клиент зависит от сервера.
+2. Клиентский plain-fallback на не-2xx — обязательная страховка: даже при нарушении порядка деплоя или отказе сервера запись самолечится.
+
+**Commits / revisions:**
+- Сервер (Часть A): `58afff6` → revision `bbaa9cgmi6ujeum6iqcs`.
+- Клиент (Часть B): `bcc9004` → revision `bbaejd9ludngqabhlut9`, бандл `public/tracker.js` = 186598 B.
+- Регрессия + revert: `ccc856f` → `1d799f8`.
+- Диагностический эхо-роут (TEMP, удалён): `8c11352` → revert `93b7e5d`.
+- **Подтверждено end-to-end из браузера:** collect вернул `{ok:true, accepted:7}`, ноль дропов/fallback.
+
+**Связанное:** изоляция FullSnapshot (2026-07-08) при gzip технически избыточна, но оставлена **намеренно** (снапшот уходит немедленно отдельным пакетом, короткие сессии воспроизводимы) — фича, не долг. См. TODO «Сессия 2026-07-09».

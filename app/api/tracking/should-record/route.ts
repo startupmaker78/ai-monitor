@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
-import { prisma } from "@/lib/prisma"
+import { prisma, withDbRetry, isTransientDbError } from "@/lib/prisma"
 import { normalizeUrl } from "@/lib/url-normalize"
 
 export const runtime = "nodejs"
@@ -62,45 +62,9 @@ const querySchema = z.object({
   url: z.string().min(1).max(2048),
 })
 
-// Транзиентный сбой pg-транспорта: Yandex Managed PostgreSQL закрывает
-// idle TCP-соединения, а Prisma-singleton держит их в пуле как «живые».
-// Первый запрос после idle тянет мёртвое → pg кидает
-// "Connection terminated unexpectedly" / "Server has closed the
-// connection" / ECONNRESET / Prisma P1001/P1017. После первого throw'а
-// pool выбрасывает битое соединение — следующий вызов идёт через
-// свежее. Значит 1 узкий retry прозрачно лечит проблему; ретраить
-// больше нельзя (замаскируем реальный DB-даун).
-//
-// TODO: вынести withDbRetry в lib/prisma.ts и применить во всех
-// prisma-роутах (collect и др.) — сейчас точечно только здесь.
-const TRANSIENT_MARKERS = [
-  "Connection terminated unexpectedly",
-  "Server has closed the connection",
-  "ECONNRESET",
-]
-const TRANSIENT_CODES = new Set(["P1001", "P1017", "ECONNRESET"])
-
-function isTransientDbError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false
-  const e = err as { message?: string; code?: string }
-  if (e.code && TRANSIENT_CODES.has(e.code)) return true
-  if (e.message) {
-    for (const m of TRANSIENT_MARKERS) {
-      if (e.message.includes(m)) return true
-    }
-  }
-  return false
-}
-
-async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn()
-  } catch (err) {
-    if (!isTransientDbError(err)) throw err
-    await new Promise((r) => setTimeout(r, 120))
-    return await fn()
-  }
-}
+// withDbRetry / isTransientDbError — общий хелпер из lib/prisma.ts
+// (транзиентный retry на stale pg-соединении, 1 повтор). Раньше здесь
+// был локальный дубль 1-в-1, вынесен в общий модуль.
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const origin = req.headers.get("origin")

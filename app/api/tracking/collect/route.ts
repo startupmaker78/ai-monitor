@@ -1,20 +1,39 @@
 import { NextRequest, NextResponse } from "next/server"
+import zlib from "node:zlib"
 import { trackingPacketSchema } from "@/lib/tracking-schema"
 import { prisma, withDbRetry, isTransientDbError } from "@/lib/prisma"
 import { putJson } from "@/lib/storage"
 import { hashIp, extractClientIp } from "@/lib/ip-hash"
 
-// Yandex Serverless Containers имеет hard architectural limit 3.5 MB на
+// zlib.gunzipSync требует Node runtime (в Edge его нет). Route и так
+// node-only (Prisma pg-adapter + aws-sdk), но раньше явного export'а не
+// было — фиксируем, чтобы разжатие gzip не сломалось при смене дефолта.
+export const runtime = "nodejs"
+
+// Yandex Serverless proxy имеет hard architectural limit 3.5 MB на
 // размер HTTP request (headers + body). Это не quota — поднять нельзя
 // ни через support, ни через флаги deploy. Источник:
 // https://yandex.cloud/en/docs/serverless-containers/concepts/limits
 //
-// Оставляем ~500 KB на headers (Cookie, User-Agent, Content-Type, etc),
-// body cap = 3 MiB. FullSnapshot rrweb с inlineStylesheet:true для
-// типичной Tilda-страницы укладывается в этот размер. Outliers >3 MiB
-// будут чанковаться в трекере (TODO в DECISIONS 2026-05-08, не в этом
-// коммите).
-const MAX_BODY_BYTES = 3 * 1024 * 1024
+// MAX_WIRE_BYTES — потолок тела как оно пришло по проводу (сжатого gzip
+// или сырого JSON). Оставляем ~500 KB на headers, body cap = 3 MiB.
+// FullSnapshot rrweb в gzip укладывается с большим запасом.
+const MAX_WIRE_BYTES = 3 * 1024 * 1024
+
+// MAX_INFLATED_BYTES — потолок РАСПАКОВАННОГО тела (anti-zip-bomb).
+// Маленький gzip может распаковаться в гигабайты и убить память
+// контейнера. 8 MiB — с запасом на будущий рост снапшотов, но конечный.
+// Enforced через zlib maxOutputLength (обрывает распаковку на пороге,
+// не аллоцируя весь выход) — memory-safe, а не post-hoc проверка.
+const MAX_INFLATED_BYTES = 8 * 1024 * 1024
+
+// gzip magic bytes. Трекер шлёт gzip-тело как application/octet-stream
+// БЕЗ заголовка Content-Encoding: этот заголовок триггерит на YC-proxy
+// UTF-8-нормализацию, которая заменяет байт 0x8b на U+FFFD и уничтожает
+// сжатое тело (эмпирически подтверждено 2026-07-09). Поэтому gzip
+// детектим ПО СОДЕРЖИМОМУ (первые два байта), а не по заголовку.
+const GZIP_MAGIC_0 = 0x1f
+const GZIP_MAGIC_1 = 0x8b
 
 // Динамический CORS: `sendBeacon` (используется трекером для финального
 // sentinel-пакета) ВСЕГДА шлёт cross-origin с credentials:'include' по
@@ -66,26 +85,64 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const origin = req.headers.get("origin")
 
   const contentLength = req.headers.get("content-length")
-  if (contentLength && parseInt(contentLength, 10) > MAX_BODY_BYTES) {
+  if (contentLength && parseInt(contentLength, 10) > MAX_WIRE_BYTES) {
     return corsResponse(
-      { error: "payload_too_large", maxBytes: MAX_BODY_BYTES },
+      { error: "payload_too_large", maxBytes: MAX_WIRE_BYTES },
       origin,
       { status: 413 },
     )
   }
 
-  let raw: string
+  // Читаем тело как байты. Трекер шлёт либо gzip (application/octet-
+  // stream, детектим по magic 1f8b), либо голый JSON (старый клиент /
+  // beacon-sentinel). Развилка по СОДЕРЖИМОМУ, не по заголовку —
+  // Content-Encoding намеренно не используется (ломается на YC-proxy).
+  let buf: Buffer
   try {
-    raw = await req.text()
+    buf = Buffer.from(await req.arrayBuffer())
   } catch {
     return corsResponse({ error: "cannot_read_body" }, origin, { status: 400 })
   }
-  if (raw.length > MAX_BODY_BYTES) {
+  // Wire-size guard на входных байтах (сжатых или сырых). Для plain это
+  // тот же порог, что раньше держал raw.length.
+  if (buf.length > MAX_WIRE_BYTES) {
     return corsResponse(
-      { error: "payload_too_large", maxBytes: MAX_BODY_BYTES },
+      { error: "payload_too_large", maxBytes: MAX_WIRE_BYTES },
       origin,
       { status: 413 },
     )
+  }
+
+  const isGzip =
+    buf.length >= 2 && buf[0] === GZIP_MAGIC_0 && buf[1] === GZIP_MAGIC_1
+
+  let raw: string
+  if (isGzip) {
+    // maxOutputLength обрывает распаковку на MAX_INFLATED_BYTES, НЕ
+    // аллоцируя весь выход — защита от gzip-бомбы memory-safe.
+    let inflated: Buffer
+    try {
+      inflated = zlib.gunzipSync(buf, { maxOutputLength: MAX_INFLATED_BYTES })
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException
+      // Превышение maxOutputLength → anti-zip-bomb trip → 413.
+      // Иначе битый gzip-поток → 400 invalid_encoding (не 500).
+      if (
+        e.code === "ERR_BUFFER_TOO_LARGE" ||
+        /maxOutputLength|larger than|exceed/i.test(e.message ?? "")
+      ) {
+        return corsResponse(
+          { error: "payload_too_large", maxBytes: MAX_INFLATED_BYTES },
+          origin,
+          { status: 413 },
+        )
+      }
+      return corsResponse({ error: "invalid_encoding" }, origin, { status: 400 })
+    }
+    raw = inflated.toString("utf8")
+  } else {
+    // Plain-путь: эквивалент прежнего req.text() (byte → utf8).
+    raw = buf.toString("utf8")
   }
 
   let json: unknown

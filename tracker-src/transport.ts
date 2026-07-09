@@ -24,28 +24,38 @@ function getCollectUrl(): string {
 
 const COLLECT_URL = getCollectUrl()
 
-// Returns true if the packet was accepted by the server (HTTP 2xx),
-// false on any failure (network error, fetch TypeError, HTTP 4xx/5xx).
-// Caller (EventBuffer) increments a session-level dropped-packets counter
-// for observability. Single-line structured log makes 413/network drops
-// greppable in DevTools instead of buried in a generic warning.
-export async function sendPacket(packet: Packet): Promise<boolean> {
-  // Important: NO `keepalive: true` here. The W3C Fetch spec caps
-  // keepalive bodies at 64 KB total in-flight; FullSnapshot of the
-  // first packet and large incremental flushes routinely exceed that
-  // limit, which makes fetch throw TypeError → packet silently
-  // dropped → rrweb-player can't build initial DOM (white screen on
-  // replay). sendPacket runs during a live page (30s interval / 200
-  // events count flush), so keepalive isn't needed — the connection
-  // is healthy, and if it fails the next interval will retry-by-
-  // accumulation. The unload path is covered separately by
-  // sendFinalPacket → sendBeacon below.
-  const bodySize = JSON.stringify(packet).length
+// gzip the packet JSON in the browser via the streams-based
+// CompressionStream API. FullSnapshot of a real Tilda page is ~2.9 MB of
+// text/HTML — it compresses several-fold, keeping the wire body well under
+// the 3.5 MiB YC serverless proxy limit. Returns a Blob of gzip bytes.
+// Caller feature-detects CompressionStream first.
+async function gzipJson(json: string): Promise<Blob> {
+  const stream = new Blob([json])
+    .stream()
+    .pipeThrough(new CompressionStream('gzip'))
+  return await new Response(stream).blob()
+}
+
+// Plain (uncompressed) send — the historical path. Body is JSON with
+// Content-Type: application/json. Returns true on HTTP 2xx, false on any
+// failure. Single-line structured log makes 413/network drops greppable.
+//
+// Important: NO `keepalive: true` here. The W3C Fetch spec caps keepalive
+// bodies at 64 KB total in-flight; FullSnapshot of the first packet and
+// large incremental flushes routinely exceed that limit, which makes fetch
+// throw TypeError → packet silently dropped → rrweb-player can't build
+// initial DOM (white screen on replay). sendPacket runs during a live page
+// (30s interval / 200 events count flush), so keepalive isn't needed — the
+// connection is healthy, and if it fails the next interval will retry-by-
+// accumulation. The unload path is covered separately by sendFinalPacket →
+// sendBeacon below.
+async function sendPlain(packet: Packet, json: string): Promise<boolean> {
+  const bodySize = json.length
   try {
     const response = await fetch(COLLECT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(packet),
+      body: json,
       credentials: 'omit',
     })
     if (!response.ok) {
@@ -67,6 +77,68 @@ export async function sendPacket(packet: Packet): Promise<boolean> {
     )
     return false
   }
+}
+
+// Returns true if the packet was accepted by the server (HTTP 2xx),
+// false on any failure. Caller (EventBuffer) increments a session-level
+// dropped-packets counter for observability.
+//
+// Transport: when CompressionStream is available we send gzip bytes as
+// `application/octet-stream` with NO Content-Encoding header. That header
+// triggers UTF-8 normalization on the YC serverless proxy which replaces
+// byte 0x8b with U+FFFD and destroys the compressed body (empirically
+// confirmed 2026-07-09); octet-stream binary without it passes intact.
+// The server detects gzip by magic bytes (1f8b), not by header.
+export async function sendPacket(packet: Packet): Promise<boolean> {
+  const json = JSON.stringify(packet)
+
+  // Feature-detect CompressionStream: absent in Safari <16.4, Firefox
+  // <113, Chrome <80. Without it, plain path exactly as before.
+  if (typeof CompressionStream !== 'undefined') {
+    let gz: Blob | null = null
+    try {
+      gz = await gzipJson(json)
+    } catch {
+      // Compression hiccup — fall through to plain (never drop over gzip).
+      gz = null
+    }
+
+    if (gz) {
+      let res: Response | null = null
+      try {
+        res = await fetch(COLLECT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: gz,
+          credentials: 'omit',
+        })
+      } catch {
+        // Network throw on the gzip send — retry once as plain below.
+        res = null
+      }
+
+      if (res && res.ok) return true
+
+      // Non-2xx OR network throw on gzip → EXACTLY ONE plain retry with the
+      // same packet. This closes the regression hole: if the server can't
+      // accept gzip (e.g. client shipped before the server deploy), we fall
+      // back to the known-good plain path instead of dropping the packet.
+      if (res) {
+        console.warn(
+          `${PREFIX} gzip rejected http_${res.status} bytes=${gz.size} ` +
+            `events=${packet.events.length} idx=${packet.packetIndex} — retrying plain`,
+        )
+      } else {
+        console.warn(
+          `${PREFIX} gzip send threw idx=${packet.packetIndex} — retrying plain`,
+        )
+      }
+      return await sendPlain(packet, json)
+    }
+  }
+
+  // No CompressionStream, or compression failed → plain path.
+  return await sendPlain(packet, json)
 }
 
 // Final packet: navigator.sendBeacon survives page unload across all

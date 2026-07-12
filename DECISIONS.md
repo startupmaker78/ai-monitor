@@ -1281,3 +1281,59 @@ Commit `533e056`, revision `bba6ldkgm14ps91j02mf`.
 - **Подтверждено end-to-end на живом коде:** повтор idx=1 не задваивает eventsCount (5, не 7); повтор final idx=2 сохраняет eventsCount (6, не 7) и endedAt (set); FK cascade удалил receipts вместе с сессией (3→0).
 
 **Связанное:** overshoot sessionsCollected (raw conditional increment, commit `867170f`) и eventsCount (эта запись) используют одну и ту же идею атомарности на уровне строки/констрейнта Postgres вместо read-then-write в app-коде.
+
+---
+
+## 2026-07-12 — academy.nolim.cc стал БОЕВЫМ (реальные посетители)
+
+**Изменение контекста:** трекер работает на живом `academy.nolim.cc` с **реальными посетителями**, а не на пустом staging из исходного брифа. Владелец подтвердил: **согласие на запись собрано, чувствительных форм на страницах нет**.
+
+**Влияние на режим работы:**
+- **Деплой = окно спотыкания записи.** Любой деплой на несколько минут может стоить реальных сессий (см. gzip-регрессию 2026-07-09 — тогда повезло, окно было пустое). Двухфазные деплои (сервер-первым / БД-первым) и клиентские fallback'и теперь не теория, а необходимость.
+- **Регрессии стоят реальных данных**, а не только тестовых. Верификация после деплоя обязательна.
+- **Ротация кредов актуальнее:** site token `e464…` вшит в `<script>` на боевом academy — ротация теперь требует координации (новый токен + обновление кода на academy), а не «просто поменять».
+
+---
+
+## 2026-07-12 — Фильтр ботов в should-record + ретроспективная чистка
+
+**Проблема:** боты/краулеры грузили academy, трекер стартовал и писал **пустые/статичные сессии** (Googlebot ×2, AhrefsBot, YandexBot, Bytespider — подтверждены в БД). Они засоряли список сессий, AI-анализ (мусорные записи) и **бюджет цели** (инкрементили `sessionsCollected`).
+
+**Решение:** `should-record` отсекает ботов по `User-Agent` **до обращения к БД** → `record:false, reason:"bot"` (HTTP 200 + CORS, легитимный отказ) → трекер fail-closed → сессия не создаётся. Паттерн: `bot\/` (семейство `Name Bot/version`), `\bbot\b`, `crawl`, `spider`, `slurp`, специфичные имена (googlebot/ahrefsbot/yandexbot/bingbot/baiduspider/bytespider/…), headless/автоматизация, HTTP-клиенты (`\bcurl\b`/`\bwget\b`/…). Пустой UA → тоже bot-like (браузер всегда шлёт UA). **Защита от false-positive:** `bot\/` требует слэша, `\bbot\b` — границы слова → бренд-ловушка **CUBOT** (реальный Android) проходит; живые mobile Safari/Chrome (iPhone/Android) НЕ отсекаются (проверено таблицей 6 браузеров / 6 ботов). Commit `2f6c23c`, revision `bba161ref5sbd6cnjdcu`.
+
+**Нюанс Gateway:** пустой UA через API Gateway не срабатывает как bot — Gateway подменяет пустой UA своим; но реальные бот-UA форвардит как есть → фильтр их ловит. Container-direct с пустым UA → корректно `bot`.
+
+**Ретроспективная чистка боевой БД:** удалено **5 бот-сессий** (+3 receipts авто-cascade +6 S3-ключей), `sessionsCollected` цели `cmrcbpgcs` скорректирован **15→10** (боты занимали 5 слотов бюджета). Реальные 26 сессий проверены целыми (spot-check).
+
+---
+
+## 2026-07-12 — Два диагноза ПЕРЕВЁРНУТЫ (важно для истории)
+
+Две «проблемы», подозреваемые ранее в спринте, при проверке данными оказались **ложными тревогами** — фиксировать, чтобы не чинить несуществующее.
+
+**(1) «cron 15-часовой gap» — ОПРОВЕРГНУТ.** Логи YC-триггера `finalize-stale`: **96 тиков из 96 за сутки, 0 пропусков, max интервал 15.6 мин.** «16.5-часовая сессия» = **clock-skew Googlebot'а** (его Web Rendering Service замокал `Date.now()` на полночь; реальный приём пакета ~16:30, `startedAt`=00:00 → cron финализировал первым же матчащим тиком). Backstop надёжен, gap'а не было. Прежняя гипотеза «cron не тикал» была неверной.
+
+**(2) «мобильный снапшот сломан» — ОПРОВЕРГНУТ.** Обе «сломанные» mobile-сессии (Android без type2, iPhone пустая) — **PRE-fix** (до изоляции FullSnapshot 07-08 + gzip 07-09). Причина = старый **413-дроп большого снапшота** (bundled >3 MiB), **уже исправлен**. Desktop той же эпохи ломался идентично (type2-доставка 5/14) → баг **размера, не устройства**. **POST-fix desktop доставляет снапшот 9/10 (90%)** vs 36% pre-fix → спринт (изоляция+gzip) работает. Post-fix mobile-трафика **n=0** → вывод о текущем mobile невозможен, замер преждевременен.
+
+---
+
+## 2026-07-12 — finalize-stale обёрнут в общий withDbRetry
+
+`cron finalize-stale-sessions` ходил в PG **без** `withDbRetry` (`updateMany` вне try/catch). Обёрнут в общий `withDbRetry` из `lib/prisma.ts` + try/catch (при исчерпании retry → `{finalized:0, error}` + лог, не голый throw). **Латентная защита:** сейчас не бьёт, т.к. контейнер на scale-to-zero → каждый cron-тик = холодный старт = свежее pg-соединение; но если станет «тёплым» (min_instances>0 / рост трафика) — переживёт stale-connection. **Теперь все 3 PG-роута (collect / should-record / finalize-stale) на едином `withDbRetry`.** Commit `e3a9023`, revision `bbarm2584at3mighlfmd`.
+
+---
+
+## 2026-07-12 — lastPacketAt: endedAt = время последней активности, не cron-тик
+
+**Проблема:** cron `finalize-stale` ставил `endedAt = now()` (момент тика) для брошенных вкладок → «длительность» раздувалась (симптом 1: реальный тестер 72 мин вместо ~3 мин активности — cron закрыл через 72 мин после старта).
+
+**Разведка вскрыла TZ-блокер альтернативы (receipts).** Идея переиспользовать `MAX(SessionPacketReceipt.createdAt)` (уже пишется, без миграции) провалилась: `createdAt` — `TIMESTAMP(3)` + `CURRENT_TIMESTAMP` под **MSK-сессией БД (Europe/Moscow)** → хранится как MSK-naive, читается драйвером как UTC → **+3ч сдвиг** относительно UTC-полей Session (Prisma `new Date()`). Использовать можно только через фрагильный хардкод `AT TIME ZONE 'Europe/Moscow'` (сломается при смене TZ). *(Для исходной цели — eventsCount-дедуп — `createdAt` не читается, TZ-баг безвреден; вылезает только при переиспользовании для времени.)*
+
+**Решение — новое поле `Session.lastPacketAt DateTime?`.** UTC by construction (пишется Prisma `new Date()`), консистентно с `startedAt/endedAt`. Cron: **column-to-column** `SET endedAt = lastPacketAt` — TZ-safe, без подзапроса.
+- **collect** пишет `lastPacketAt` на каждом НОВОМ пакете, **свёрнуто в существующие writes** (в `createMany` + в тот же `sessionUpdate`, что пишет eventsCount) — 0 лишних writes; дубль (`receiptInserted=0`) не двигает.
+- **cron** — 2 шага в `withDbRetry`: (1) `$executeRaw UPDATE SET endedAt=lastPacketAt WHERE endedAt=null AND startedAt<staleBefore AND lastPacketAt IS NOT NULL` (staleBefore параметризован, не интерполяция); (2) `updateMany` fallback `endedAt=now WHERE ... lastPacketAt IS NULL` (legacy без поля не застревают). Критерий stale (60 мин) не изменён.
+- **Миграция** `20260712231237_add_session_last_packet_at` — аддитивный `ALTER TABLE ADD COLUMN nullable`, применена **вручную** (migrate deploy НЕ в CI), порядок **БД→код**.
+
+**Доказано end-to-end на живом коде:** collect пишет lastPacketAt и двигает его на новом пакете (дубль не двигает); cron ставит `endedAt === lastPacketAt` (точное совпадение), на ~5с раньше cron-тика → **взял значение поля, а не now**; fallback для `lastPacketAt IS NULL` → `endedAt=now`. Commit `813cd1e`, revision `bbaahh5mr8oek3o2r2an`.
+
+*(Заметка: `endedAt` теперь корректен по времени активности, но `startedAt` остаётся клиентским — при clock-skew (боты) длительность всё ещё может врать со стороны startedAt. Боты отсекаются фильтром, для людей startedAt корректен.)*

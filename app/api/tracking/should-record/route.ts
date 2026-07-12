@@ -66,8 +66,43 @@ const querySchema = z.object({
 // (транзиентный retry на stale pg-соединении, 1 повтор). Раньше здесь
 // был локальный дубль 1-в-1, вынесен в общий модуль.
 
+// User-Agent маркеры ботов/краулеров/headless (case-insensitive). Боты
+// грузят страницу, трекер стартует и пишет пустые/статичные сессии с
+// cron-раздутыми длительностями (Googlebot/AhrefsBot/YandexBot уже
+// намусорили на academy). Отсекаем на входе → трекер не стартует.
+//
+// `bot\/` ловит семейство "Name Bot/version" (Googlebot/2.1,
+// AhrefsBot/7.0, YandexBot/3.0, bingbot/2.0, SemrushBot/…) НЕ задевая
+// бренды с "bot" без слэша (напр. Android-телефоны CUBOT). `\bbot\b`
+// ловит редкое standalone-"bot". Плюс специфичные имена и generic
+// crawl/spider/slurp. Ни один реальный браузер (Chrome/Safari/Firefox/
+// Edge на Win/Mac/iOS/Android) ни один из токенов не содержит.
+const BOT_UA_PATTERN =
+  /bot\/|\bbot\b|crawl|spider|slurp|googlebot|ahrefsbot|yandexbot|bingbot|duckduckbot|baiduspider|facebookexternalhit|ia_archiver|semrush|mj12bot|dotbot|petalbot|bytespider|gptbot|ccbot|applebot|headless|phantomjs|puppeteer|playwright|python-requests|node-fetch|go-http-client|okhttp|scrapy|lighthouse|pingdom|uptimerobot|\bcurl\b|\bwget\b/i
+
+function isBotUserAgent(ua: string | null): boolean {
+  // Легитимный трекер всегда за браузером → UA присутствует. Пустой /
+  // отсутствующий UA = не-браузерный клиент (сканер/скрипт) → bot-like:
+  // реальный Chrome/Safari/Firefox всегда шлёт непустой User-Agent.
+  if (!ua || ua.trim() === "") return true
+  return BOT_UA_PATTERN.test(ua)
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const origin = req.headers.get("origin")
+
+  // Фильтр ботов — РАНЬШЕ любых обращений к БД (site.findUnique /
+  // target.findMany): для бота незачем ходить в базу, ранний выход
+  // заодно снижает bot-нагрузку на PG. Отказ легитимный — HTTP 200 +
+  // CORS с record:false (как budget_exhausted/no_target), НЕ ошибка;
+  // трекер fail-closed → сессия не создаётся.
+  const ua = req.headers.get("user-agent")
+  if (isBotUserAgent(ua)) {
+    console.log(
+      "[should-record] bot filtered ua=" + (ua ? ua.slice(0, 80) : "<empty>"),
+    )
+    return corsResponse({ record: false, reason: "bot" }, origin)
+  }
 
   const parsed = querySchema.safeParse({
     token: req.nextUrl.searchParams.get("token"),

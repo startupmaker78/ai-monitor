@@ -70,19 +70,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // idle поймает мёртвое idle-соединение из пула. Оборачиваем в общий
   // withDbRetry (1 повтор на transient) — единообразно с collect/
   // should-record. Критерий финализации не меняем.
-  let result: { count: number }
+  let finalized: number
   try {
-    result = await withDbRetry(() =>
-      prisma.session.updateMany({
+    finalized = await withDbRetry(async () => {
+      // (1) Реальное время последней активности: endedAt = lastPacketAt
+      // (server-side UTC, column-to-column — TZ-safe, без подзапроса).
+      // Чинит раздутие длительности брошенных вкладок (cron ставил
+      // endedAt=now-тика вместо реального конца). Идемпотентно на
+      // retry: повтор увидит endedAt уже не null → 0 строк.
+      const byLastPacket = await prisma.$executeRaw`
+        UPDATE "Session"
+        SET "endedAt" = "lastPacketAt"
+        WHERE "endedAt" IS NULL
+          AND "startedAt" < ${staleBefore}
+          AND "lastPacketAt" IS NOT NULL
+      `
+      // (2) Fallback для legacy-строк без lastPacketAt (до миграции) →
+      // endedAt=now (прежнее поведение, не оставляем null). Идёт ПОСЛЕ
+      // (1): строки с lastPacketAt уже закрыты, сюда попадут только
+      // lastPacketAt IS NULL. Сейчас таких 0, но fallback обязателен.
+      const byFallback = await prisma.session.updateMany({
         where: {
           endedAt: null,
           startedAt: { lt: staleBefore },
+          lastPacketAt: null,
         },
         data: {
           endedAt: new Date(),
         },
-      }),
-    )
+      })
+      return byLastPacket + byFallback.count
+    })
   } catch (err) {
     const e = err as Error
     const transient = isTransientDbError(err)
@@ -99,10 +117,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     )
   }
 
-  console.log(`[cron-finalize] Finalized ${result.count} stale sessions`)
+  console.log(`[cron-finalize] Finalized ${finalized} stale sessions`)
 
   return NextResponse.json({
-    finalized: result.count,
+    finalized,
     timestamp: new Date().toISOString(),
   })
 }

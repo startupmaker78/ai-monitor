@@ -298,6 +298,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             userAgent: packet.userAgent,
             startedAt: startedAtDate,
             endedAt: packet.isFinal ? nowDate : null,
+            // lastPacketAt = server-side время этого (первого) пакета для
+            // cron finalize-stale. Сворачиваем в createMany — лишнего
+            // write нет.
+            lastPacketAt: nowDate,
             // eventsCount наполняется ниже через receipt-гейт единообразно
             // для всех пакетов (в т.ч. первого) — здесь 0, чтобы первый
             // пакет не задвоился (create + receipt-increment).
@@ -330,14 +334,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const sessionUpdate: {
         eventsCount?: { increment: number }
         endedAt?: Date
+        lastPacketAt?: Date
       } = {}
       if (receiptInserted === 1) {
         sessionUpdate.eventsCount = { increment: packet.events.length }
+        // lastPacketAt двигаем только на НОВОМ пакете (дубль
+        // receiptInserted=0 не трогаем — дубль ≠ новая активность).
+        // Сворачиваем в тот же update, что и eventsCount — лишних
+        // writes нет.
+        sessionUpdate.lastPacketAt = nowDate
       }
       if (!isFirstPacket && packet.isFinal) {
         sessionUpdate.endedAt = nowDate
       }
-      if (sessionUpdate.eventsCount || sessionUpdate.endedAt) {
+      if (
+        sessionUpdate.eventsCount ||
+        sessionUpdate.endedAt ||
+        sessionUpdate.lastPacketAt
+      ) {
         await tx.session.update({
           where: { sessionToken: packet.sessionToken },
           data: sessionUpdate,

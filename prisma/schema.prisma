@@ -156,6 +156,13 @@ model Session {
   userAgent        String          @db.Text
   startedAt        DateTime
   endedAt          DateTime?
+  // Время последнего долетевшего пакета (server-side, UTC). cron
+  // finalize-stale ставит endedAt = lastPacketAt (реальный конец
+  // активности), а не now-тика — чинит раздутие длительности брошенных
+  // вкладок. Обновляется в collect на каждом НОВОМ пакете (сворачивается
+  // в существующие writes). Nullable: legacy-строки до миграции → NULL,
+  // для них cron fallback на now.
+  lastPacketAt     DateTime?
   eventsCount      Int             @default(0)
   storageKey       String?
   analysisTargetId String?

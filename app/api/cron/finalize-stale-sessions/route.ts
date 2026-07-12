@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { prisma, withDbRetry, isTransientDbError } from "@/lib/prisma"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -63,15 +63,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     Date.now() - STALE_FALLBACK_MINUTES * 60 * 1000,
   )
 
-  const result = await prisma.session.updateMany({
-    where: {
-      endedAt: null,
-      startedAt: { lt: staleBefore },
-    },
-    data: {
-      endedAt: new Date(),
-    },
-  })
+  // withDbRetry: cron тикает раз в 15 мин. Сейчас контейнер на
+  // scale-to-zero → каждый тик холодный старт → свежее pg-соединение,
+  // поэтому stale-connection не проявляется. Но если контейнер станет
+  // «тёплым» (min_instances>0 / рост трафика) — первый запрос после
+  // idle поймает мёртвое idle-соединение из пула. Оборачиваем в общий
+  // withDbRetry (1 повтор на transient) — единообразно с collect/
+  // should-record. Критерий финализации не меняем.
+  let result: { count: number }
+  try {
+    result = await withDbRetry(() =>
+      prisma.session.updateMany({
+        where: {
+          endedAt: null,
+          startedAt: { lt: staleBefore },
+        },
+        data: {
+          endedAt: new Date(),
+        },
+      }),
+    )
+  } catch (err) {
+    const e = err as Error
+    const transient = isTransientDbError(err)
+    console.error(
+      "[cron-finalize] db " +
+        (transient ? "retry exhausted" : "error") +
+        " err=" + e.name + ":" + e.message,
+    )
+    // Не роняем голым throw: cron переживёт сбой и отработает на
+    // следующем тике. Осмысленный ответ для наблюдаемости.
+    return NextResponse.json(
+      { finalized: 0, error: transient ? "db_unavailable" : "db_error" },
+      { status: transient ? 503 : 500 },
+    )
+  }
 
   console.log(`[cron-finalize] Finalized ${result.count} stale sessions`)
 

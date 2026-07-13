@@ -41,6 +41,6 @@ export function validateDomain(normalized: string): string {
 // TODO: вынести base URL в NEXT_PUBLIC_APP_URL env var (сейчас захардкожен
 // staging — на production надо заменить).
 export function buildTrackerSnippet(trackingToken: string): string {
-  const baseUrl = "https://staging.вебмонитор.рф"
+  const baseUrl = "https://staging.xn--90abjntggcss.xn--p1ai"
   return `<script async src="${baseUrl}/tracker.js" data-token="${trackingToken}"></script>`
 }

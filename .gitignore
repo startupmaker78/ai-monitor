@@ -45,3 +45,7 @@ next-env.d.ts
 # tracker local smoke-test page (not committed; copy to public/ to test)
 /tracker-src/test.html
 /public/test.html
+
+# local architecture/implementation planning docs (design notes;
+# authoritative decisions live in DECISIONS.md) — kept local, not in repo
+/plans/

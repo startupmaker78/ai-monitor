@@ -16,7 +16,7 @@ function corsHeaders(origin: string | null): Record<string, string> {
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Credentials": "true",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type, X-Site-Token",
       "Access-Control-Max-Age": "86400",
       Vary: "Origin",
     }
@@ -24,7 +24,7 @@ function corsHeaders(origin: string | null): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Site-Token",
     "Access-Control-Max-Age": "86400",
   }
 }
@@ -135,8 +135,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return corsResponse({ record: false, reason: "bot" }, origin)
   }
 
+  // site-token: сначала из заголовка X-Site-Token (новый трекер —
+  // токен НЕ в URL, не течёт в access-лог), fallback на query ?token=
+  // (старый закешированный tracker.js всё ещё шлёт query — backward-
+  // compat, не ломаем). Единый resolved token дальше по логике.
+  // См. DECISIONS 2026-07-13 «Утечка site-token», фаза 1 (сервер).
+  const token =
+    req.headers.get("x-site-token") ?? req.nextUrl.searchParams.get("token")
   const parsed = querySchema.safeParse({
-    token: req.nextUrl.searchParams.get("token"),
+    token,
     url: req.nextUrl.searchParams.get("url"),
   })
   if (!parsed.success) {

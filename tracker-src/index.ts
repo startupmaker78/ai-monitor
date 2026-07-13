@@ -7,9 +7,17 @@ const SHOULD_RECORD_TIMEOUT_MS = 3000
 
 function parseSiteToken(): string | null {
   const script = document.currentScript
-  if (!script || !(script instanceof HTMLScriptElement) || !script.src) {
+  if (!script || !(script instanceof HTMLScriptElement)) {
     return null
   }
+  // Приоритет — data-token атрибут (<script src="/tracker.js"
+  // data-token="...">): токен НЕ в URL → не течёт в платформенный
+  // access-лог при загрузке бандла (GET /tracker.js без query).
+  // Fallback — ?token= из script.src: старый embed на academy ещё шлёт
+  // токен в query, работает до обновления <script> (backward-compat).
+  const dataToken = script.dataset.token
+  if (dataToken) return dataToken
+  if (!script.src) return null
   try {
     return new URL(script.src).searchParams.get('token')
   } catch {
@@ -72,18 +80,26 @@ async function checkShouldRecord(
   siteToken: string,
   pageUrl: string,
 ): Promise<ShouldRecordResponse> {
+  // Токен уходит в заголовке X-Site-Token, НЕ в URL — иначе он течёт в
+  // платформенный access-лог (`GET …?token=… 200`). В query остаётся
+  // только url= (pageUrl). Кастомный заголовок на cross-origin GET →
+  // браузер шлёт preflight OPTIONS; сервер should-record разрешает
+  // X-Site-Token (DECISIONS 2026-07-13, фаза 1) и принимает legacy
+  // ?token= как fallback, так что рассинхрон клиент/сервер не ломает.
   const url =
     apiOrigin +
-    '/api/tracking/should-record?token=' +
-    encodeURIComponent(siteToken) +
-    '&url=' +
+    '/api/tracking/should-record?url=' +
     encodeURIComponent(pageUrl)
 
   const ctrl = new AbortController()
   const timeoutId = setTimeout(() => ctrl.abort(), SHOULD_RECORD_TIMEOUT_MS)
 
   try {
-    const res = await fetch(url, { method: 'GET', signal: ctrl.signal })
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-Site-Token': siteToken },
+      signal: ctrl.signal,
+    })
     clearTimeout(timeoutId)
     if (!res.ok) {
       throw new Error('http_' + res.status)

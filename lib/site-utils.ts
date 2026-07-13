@@ -32,11 +32,15 @@ export function validateDomain(normalized: string): string {
 }
 
 // HTML-snippet для вставки на сайт юзера. Загружает tracker.js с нашего
-// origin'а и передаёт trackingToken как query.
+// origin'а и передаёт trackingToken через data-token АТРИБУТ (не query):
+// так бандл грузится как `GET /tracker.js` без query → токен не течёт в
+// платформенный access-лог. Трекер читает его из data-token (fallback
+// на ?token= для старых embed'ов). См. DECISIONS 2026-07-13 «Утечка
+// site-token».
 //
 // TODO: вынести base URL в NEXT_PUBLIC_APP_URL env var (сейчас захардкожен
 // staging — на production надо заменить).
 export function buildTrackerSnippet(trackingToken: string): string {
   const baseUrl = "https://staging.вебмонитор.рф"
-  return `<script async src="${baseUrl}/tracker.js?token=${trackingToken}"></script>`
+  return `<script async src="${baseUrl}/tracker.js" data-token="${trackingToken}"></script>`
 }

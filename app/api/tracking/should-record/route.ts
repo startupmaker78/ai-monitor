@@ -88,6 +88,34 @@ function isBotUserAgent(ua: string | null): boolean {
   return BOT_UA_PATTERN.test(ua)
 }
 
+// Единая observability-строка на КАЖДЫЙ исход should-record. Снимает
+// диагностическую слепоту: раньше молчали record:true/no_target/budget,
+// нельзя было посчитать распределение URL и причины отказов (сверка с
+// Метрикой требовала гадания). Формат парсимый:
+//   [should-record] url=<normalized> reason=<...> matched=<targetId|->
+// url — уже query-stripped (normalizeUrl убрал query/hash) → приватно,
+// site-token НЕ логируется. reason — outcome-код. matched — цель или "-".
+//
+// Объём: трекер site-wide → 1 вызов на pageload. Текущий трафик academy
+// ~сотни вызовов/день → ~десятки KB/день логов, копейки. При крупном
+// росте (10k+/день) — рассмотреть сэмплирование массового no_target;
+// пока полная видимость важнее (именно no_target-URL показывают, какие
+// страницы стоит добавить в цели).
+function logOutcome(
+  reason: string,
+  normalizedUrl: string | null,
+  matchedTargetId: string | null,
+): void {
+  console.log(
+    "[should-record] url=" +
+      (normalizedUrl ?? "-") +
+      " reason=" +
+      reason +
+      " matched=" +
+      (matchedTargetId ?? "-"),
+  )
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const origin = req.headers.get("origin")
 
@@ -98,8 +126,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // трекер fail-closed → сессия не создаётся.
   const ua = req.headers.get("user-agent")
   if (isBotUserAgent(ua)) {
+    // Bot-проверка до парсинга url → нормализованного url ещё нет;
+    // логируем reason=bot + обрезанный UA (для аудита какие боты режем).
     console.log(
-      "[should-record] bot filtered ua=" + (ua ? ua.slice(0, 80) : "<empty>"),
+      "[should-record] url=- reason=bot matched=- ua=" +
+        (ua ? ua.slice(0, 80) : "<empty>"),
     )
     return corsResponse({ record: false, reason: "bot" }, origin)
   }
@@ -109,6 +140,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     url: req.nextUrl.searchParams.get("url"),
   })
   if (!parsed.success) {
+    logOutcome("bad_request", null, null)
     return corsResponse(
       { record: false, reason: "bad_request" },
       origin,
@@ -118,6 +150,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const normalized = normalizeUrl(parsed.data.url)
   if (!normalized) {
+    logOutcome("invalid_url", null, null)
     return corsResponse(
       { record: false, reason: "invalid_url" },
       origin,
@@ -142,6 +175,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }),
     )
     if (!site) {
+      logOutcome("unknown_site", normalized, null)
       return corsResponse(
         { record: false, reason: "unknown_site" },
         origin,
@@ -180,6 +214,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         " tokenTail=..." + tokenTail +
         " err=" + e.name + ":" + e.message,
     )
+    // + унифицированная outcome-строка для полного reason-подсчёта
+    // (детальный error-лог выше остаётся для диагностики).
+    logOutcome("db_unavailable", normalized, null)
     // 503 (не 500, не 200): транзиентный DB-сбой, клиент увидит fail-
     // closed через network_error path и сможет перезагрузить страницу
     // после того как pool оживёт. Не проглатываем как record:false —
@@ -201,15 +238,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!matched) {
+    logOutcome("no_target", normalized, null)
     return corsResponse({ record: false, reason: "no_target" }, origin)
   }
 
   if (matched.sessionsCollected >= matched.sessionsBudget) {
+    logOutcome("budget_exhausted", normalized, matched.id)
     return corsResponse(
       { record: false, reason: "budget_exhausted" },
       origin,
     )
   }
 
+  logOutcome("record", normalized, matched.id)
   return corsResponse({ record: true, targetId: matched.id }, origin)
 }

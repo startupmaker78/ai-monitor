@@ -1,16 +1,12 @@
 import Link from "next/link"
 import type { SessionsForUser } from "@/lib/sessions-data"
+import { LocalDateTime } from "@/components/ui/local-date-time"
 
 type Props = {
   sessions: SessionsForUser["sessions"]
   selectedSiteId: string | null
   currentSort: "newest" | "oldest"
 }
-
-const dateFmt = new Intl.DateTimeFormat("ru-RU", {
-  dateStyle: "medium",
-  timeStyle: "short",
-})
 
 function formatDuration(startedAt: Date, endedAt: Date | null): string {
   if (!endedAt) return "активна"
@@ -61,7 +57,7 @@ export function SessionsTable({ sessions, selectedSiteId, currentSort }: Props) 
           {sessions.map((s) => (
             <tr key={s.id} className="hover:bg-muted/30">
               <td className="px-4 py-3 whitespace-nowrap">
-                {dateFmt.format(s.startedAt)}
+                <LocalDateTime value={s.startedAt} />
               </td>
               <td className="px-4 py-3 whitespace-nowrap">
                 {s.endedAt ? (

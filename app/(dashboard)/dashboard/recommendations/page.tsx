@@ -7,14 +7,10 @@ import {
 } from "@/lib/recommendations-data"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { LocalDateTime } from "@/components/ui/local-date-time"
 import { TargetSelector } from "./target-selector"
 
 export const metadata = { title: "Рекомендации — Вебмонитор" }
-
-const dateFmt = new Intl.DateTimeFormat("ru-RU", {
-  dateStyle: "medium",
-  timeStyle: "short",
-})
 
 const PRIORITY_META: Record<
   string,
@@ -106,7 +102,7 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
           </span>
           {data.analysis && (
             <>
-              {" · "}Анализ от {dateFmt.format(data.analysis.createdAt)}
+              {" · "}Анализ от <LocalDateTime value={data.analysis.createdAt} />
             </>
           )}
         </p>

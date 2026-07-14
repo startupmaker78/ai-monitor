@@ -2,14 +2,10 @@ import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { loadOwnedSession } from "@/lib/sessions-data"
+import { LocalDateTime } from "@/components/ui/local-date-time"
 import { SessionPlayer } from "./session-player"
 
 export const metadata = { title: "Воспроизведение сессии — Вебмонитор" }
-
-const dateFmt = new Intl.DateTimeFormat("ru-RU", {
-  dateStyle: "medium",
-  timeStyle: "short",
-})
 
 function formatDuration(startedAt: Date, endedAt: Date | null): string {
   if (!endedAt) return "активна"
@@ -49,7 +45,7 @@ export default async function SessionPlayerPage({ params }: PageProps) {
           Воспроизведение сессии
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {dateFmt.format(owned.startedAt)} ·{" "}
+          <LocalDateTime value={owned.startedAt} /> ·{" "}
           {formatDuration(owned.startedAt, owned.endedAt)} ·{" "}
           {owned.eventsCount.toLocaleString("ru-RU")} событий ·{" "}
           сайт {owned.site.domain} ·{" "}

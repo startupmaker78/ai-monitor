@@ -18,6 +18,8 @@ const ERROR_TO_HTTP: Record<RunAnalysisError, number> = {
   previous_recs_open: 409,
   monthly_limit: 429,
   race_condition: 409,
+  provider_denied: 502,
+  relay_unavailable: 503,
   claude_retriable: 502,
   claude_invalid: 502,
   internal: 500,

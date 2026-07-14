@@ -74,8 +74,9 @@ jobs:
                    CRON_SECRET \
                    DEMO_USER_ID \
                    MIN_SESSIONS_BUDGET \
-                   AI_GATEWAY_AUTH; do
-            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},version-id=e6qo787fe7hpr40ahdvf,key=$k,environment-variable=$k"
+                   AI_GATEWAY_AUTH \
+                   AI_API_URL; do
+            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},version-id=e6qhkba8rm49r4ht3dci,key=$k,environment-variable=$k"
           done
 
           eval yc serverless container revision deploy \

@@ -17,6 +17,8 @@ export type RunAnalysisError =
   | "previous_recs_open"
   | "monthly_limit"
   | "race_condition"
+  | "provider_denied"
+  | "relay_unavailable"
   | "claude_retriable"
   | "claude_invalid"
   | "internal"
@@ -189,6 +191,41 @@ export async function runAnalysis(
         error: "claude_invalid",
         message:
           "Анализ не удался — Claude вернул нечитаемый ответ. Попробуйте ещё раз.",
+        analysisId: analysis.id,
+      }
+    }
+    if (claudeResult.error === "access_denied") {
+      // Провайдер/шлюз отклонил (403): гео/политика/ключ. НЕ ретраибельно.
+      console.error("[analysis-runner] provider denied request (403)", {
+        analysisId: analysis.id,
+        targetId,
+        errorType: claudeResult.error,
+        errorCategory: "provider_denied",
+        details: claudeResult.details,
+      })
+      await markFailed(analysis.id, targetId)
+      return {
+        ok: false,
+        error: "provider_denied",
+        message:
+          "Провайдер отклонил запрос (гео-ограничение / политика / ключ). Повтор не поможет — нужна проверка конфигурации AI-шлюза.",
+        analysisId: analysis.id,
+      }
+    }
+    if (claudeResult.error === "relay_unavailable") {
+      // 5xx от AI-шлюза/провайдера — наш путь лёг, не rate-limit.
+      console.error("[analysis-runner] AI relay unavailable (5xx)", {
+        analysisId: analysis.id,
+        targetId,
+        errorType: claudeResult.error,
+        errorCategory: "relay_unavailable",
+        details: claudeResult.details,
+      })
+      await markFailed(analysis.id, targetId)
+      return {
+        ok: false,
+        error: "relay_unavailable",
+        message: "AI-шлюз временно недоступен. Попробуйте позже.",
         analysisId: analysis.id,
       }
     }

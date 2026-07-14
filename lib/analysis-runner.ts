@@ -8,11 +8,12 @@ import {
 import { buildMockAnalysisInput } from "@/lib/mock-session-data"
 import { getEffectiveTier } from "@/lib/tier-limits"
 import { validateSiteOwnership } from "@/lib/site-data"
+import { getMinSessionsBudget } from "@/lib/config"
 
 export type RunAnalysisError =
   | "unauthorized"
   | "target_not_found"
-  | "target_not_ready"
+  | "not_enough_sessions"
   | "previous_recs_open"
   | "monthly_limit"
   | "race_condition"
@@ -51,12 +52,18 @@ export async function runAnalysis(
   const owns = await validateSiteOwnership(target.siteId, userId)
   if (!owns) return notFoundResult()
 
-  // 3. Состояние цели.
-  if (target.status !== "READY") {
+  // 3. Минимум сессий для запуска (Модель B «полная свобода»): анализ
+  // доступен при sessionsCollected >= MIN независимо от budget и статуса.
+  // budget — КАП сбора (collect стопается на нём), НЕ гейт запуска.
+  // ACTIVE и READY оба допускают запуск; ANALYZING отсекается атомарным
+  // переходом (шаг 6); ARCHIVED — гейтом archivedAt (шаг 2). Повтор
+  // возможен: цель после анализа возвращается в сбор, а не в терминал.
+  const minToRun = getMinSessionsBudget()
+  if (target.sessionsCollected < minToRun) {
     return {
       ok: false,
-      error: "target_not_ready",
-      message: statusMessage(target.status),
+      error: "not_enough_sessions",
+      message: `Для запуска анализа нужно минимум ${minToRun} сессий, собрано ${target.sessionsCollected}.`,
     }
   }
 
@@ -102,10 +109,12 @@ export async function runAnalysis(
     }
   }
 
-  // 6. Атомарный переход READY → ANALYZING. Защищает от двух
-  // одновременных кликов.
+  // 6. Атомарный переход ACTIVE|READY → ANALYZING. Защищает от двух
+  // одновременных кликов: параллельный запрос увидит ANALYZING (не в
+  // {ACTIVE,READY}) → count=0 → race_condition. Принимает ACTIVE (ранний
+  // запуск до budget, Модель B), а не только READY.
   const transition = await prisma.analysisTarget.updateMany({
-    where: { id: targetId, status: "READY" },
+    where: { id: targetId, status: { in: ["ACTIVE", "READY"] } },
     data: { status: "ANALYZING" },
   })
   if (transition.count === 0) {
@@ -174,12 +183,12 @@ export async function runAnalysis(
       })
       // Запрос дошёл, токены потрачены, но ответ нечитаемый — бюджет цели
       // считаем потраченным.
-      await markFailed(analysis.id, targetId, "COMPLETED")
+      await markFailed(analysis.id, targetId)
       return {
         ok: false,
         error: "claude_invalid",
         message:
-          "Анализ не удался — Claude вернул нечитаемый ответ. Бюджет цели потрачен, повторный анализ — с нового периода.",
+          "Анализ не удался — Claude вернул нечитаемый ответ. Попробуйте ещё раз.",
         analysisId: analysis.id,
       }
     }
@@ -191,7 +200,7 @@ export async function runAnalysis(
       errorCategory: "claude_retriable",
       details: claudeResult.details,
     })
-    await markFailed(analysis.id, targetId, "READY")
+    await markFailed(analysis.id, targetId)
     return {
       ok: false,
       error: "claude_retriable",
@@ -217,17 +226,29 @@ export async function runAnalysis(
       tokensUsed:
         claudeResult.usage.inputTokens + claudeResult.usage.outputTokens,
     })
-    await markFailed(analysis.id, targetId, "COMPLETED")
+    await markFailed(analysis.id, targetId)
     return {
       ok: false,
       error: "claude_invalid",
       message:
-        "Анализ не удался — Claude вернул некорректные рекомендации. Бюджет цели потрачен.",
+        "Анализ не удался — Claude вернул некорректные рекомендации. Попробуйте ещё раз.",
       analysisId: analysis.id,
     }
   }
 
   // 14. Финальная транзакция.
+  // Модель B: после анализа цель возвращается в СБОР, не в терминальный
+  // COMPLETED. READY если добрала budget, иначе ACTIVE (сбор продолжится
+  // до budget). Повтор возможен — гейтится месячным лимитом + закрытием
+  // top-10 предыдущего DONE. Сбор заморожен на время ANALYZING
+  // (should-record матчит только ACTIVE/READY), поэтому свежее чтение
+  // sessionsCollected точно отражает фактический сбор.
+  const post = await prisma.analysisTarget.findUnique({
+    where: { id: targetId },
+    select: { sessionsCollected: true, sessionsBudget: true },
+  })
+  const recollectStatus: "READY" | "ACTIVE" =
+    post && post.sessionsCollected >= post.sessionsBudget ? "READY" : "ACTIVE"
   try {
     await prisma.$transaction([
       prisma.recommendation.createMany({
@@ -259,7 +280,7 @@ export async function runAnalysis(
       }),
       prisma.analysisTarget.update({
         where: { id: targetId },
-        data: { status: "COMPLETED" },
+        data: { status: recollectStatus },
       }),
     ])
   } catch (err) {
@@ -267,7 +288,7 @@ export async function runAnalysis(
       `[runAnalysis] final transaction failed for analysis ${analysis.id}:`,
       err,
     )
-    await markFailed(analysis.id, targetId, "COMPLETED").catch(() => {})
+    await markFailed(analysis.id, targetId).catch(() => {})
     return {
       ok: false,
       error: "internal",
@@ -285,21 +306,6 @@ export async function runAnalysis(
 
 function notFoundResult(): RunAnalysisResult {
   return { ok: false, error: "target_not_found", message: "Цель не найдена." }
-}
-
-function statusMessage(status: string): string {
-  switch (status) {
-    case "ACTIVE":
-      return "Цель ещё не накопила достаточно сессий (нужно ≥100)."
-    case "ANALYZING":
-      return "Для этой цели уже идёт анализ. Дождитесь завершения."
-    case "COMPLETED":
-      return "Анализ этой цели уже завершён в текущем периоде. Повторно — с нового периода."
-    case "ARCHIVED":
-      return "Цель архивирована."
-    default:
-      return `Цель в статусе ${status}, запуск невозможен.`
-  }
 }
 
 function claudeRetriableMessage(error: string): string {
@@ -377,7 +383,6 @@ async function safeUpdateAnalysisPrompt(
 async function markFailed(
   analysisId: string,
   targetId: string,
-  newTargetStatus: "READY" | "COMPLETED",
 ): Promise<void> {
   await prisma.analysis
     .update({
@@ -390,14 +395,25 @@ async function markFailed(
         e,
       )
     })
+  // Модель B: неудачный анализ тоже возвращает цель в СБОР (не терминал).
+  // READY если добрала budget, иначе ACTIVE. FAILED-анализ не считается в
+  // месячный лимит (status not FAILED) → повтор возможен.
+  const t = await prisma.analysisTarget
+    .findUnique({
+      where: { id: targetId },
+      select: { sessionsCollected: true, sessionsBudget: true },
+    })
+    .catch(() => null)
+  const revertStatus: "READY" | "ACTIVE" =
+    t && t.sessionsCollected >= t.sessionsBudget ? "READY" : "ACTIVE"
   await prisma.analysisTarget
     .update({
       where: { id: targetId },
-      data: { status: newTargetStatus },
+      data: { status: revertStatus },
     })
     .catch((e) => {
       console.error(
-        `[runAnalysis] failed to revert target ${targetId} to ${newTargetStatus}:`,
+        `[runAnalysis] failed to revert target ${targetId} to ${revertStatus}:`,
         e,
       )
     })

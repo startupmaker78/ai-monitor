@@ -3,7 +3,6 @@
 import { useFormState, useFormStatus } from "react-dom"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -208,7 +207,7 @@ export function TargetsClient(props: Props) {
 
 const STATUS_LABELS: Record<string, string> = {
   ACTIVE: "Сбор сессий",
-  READY: "Готова к анализу",
+  READY: "Цель достигнута",
   ANALYZING: "Анализируется",
   COMPLETED: "Анализ завершён",
   ARCHIVED: "Архив",
@@ -284,7 +283,7 @@ function TargetCard({
               {target.url}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {STATUS_LABELS[target.status] ?? target.status}
+              {archived ? "Архив" : (STATUS_LABELS[target.status] ?? target.status)}
               {" • "}
               Сессий: {target.sessionsCollected} / {target.sessionsBudget}
               {" • "}
@@ -335,25 +334,7 @@ function AnalyzeButton({
   onAnalyze: () => void
   minSessionsBudget: number
 }) {
-  if (target.status === "ACTIVE") {
-    return (
-      <Button type="button" size="sm" disabled>
-        {`Накоплено ${target.sessionsCollected}/${target.sessionsBudget} (нужно ≥${minSessionsBudget})`}
-      </Button>
-    )
-  }
-  if (target.status === "READY") {
-    return (
-      <Button
-        type="button"
-        size="sm"
-        disabled={analyzing}
-        onClick={onAnalyze}
-      >
-        {analyzing ? "Идёт анализ ~1 минута…" : "Запустить анализ"}
-      </Button>
-    )
-  }
+  // ANALYZING — идёт анализ, запуск заблокирован.
   if (target.status === "ANALYZING") {
     return (
       <Button type="button" size="sm" disabled>
@@ -361,25 +342,24 @@ function AnalyzeButton({
       </Button>
     )
   }
-  if (target.status === "COMPLETED") {
-    // Успешная транзакция analysis-runner'а переводит target в COMPLETED
-    // только после записи Recommendation'ов, поэтому COMPLETED
-    // однозначно означает «рекомендации есть».
+  // Модель B «полная свобода»: запуск доступен при collected >= минимума
+  // (5), независимо от статуса ACTIVE/READY и от budget. budget — только
+  // КАП сбора, не гейт запуска. Ниже минимума — кнопка неактивна с честным
+  // прогрессом. Сбор продолжается и после запуска (цель возвращается в
+  // ACTIVE/READY), повтор возможен — сервер догейтит (top-10 / лимит).
+  const canRun = target.sessionsCollected >= minSessionsBudget
+  if (!canRun) {
     return (
-      <div className="flex flex-col items-end gap-1">
-        <Button type="button" size="sm" disabled>
-          Завершён в этом периоде
-        </Button>
-        <Link
-          href={`/dashboard/recommendations?targetId=${target.id}`}
-          className="text-xs text-primary hover:underline"
-        >
-          Перейти к рекомендациям →
-        </Link>
-      </div>
+      <Button type="button" size="sm" disabled>
+        {`Накоплено ${target.sessionsCollected}/${target.sessionsBudget} (для запуска нужно ≥${minSessionsBudget})`}
+      </Button>
     )
   }
-  return null
+  return (
+    <Button type="button" size="sm" disabled={analyzing} onClick={onAnalyze}>
+      {analyzing ? "Идёт анализ ~1 минута…" : "Запустить анализ"}
+    </Button>
+  )
 }
 
 function ArchiveControl({

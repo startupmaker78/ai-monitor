@@ -14,7 +14,7 @@ const schema = z.object({ targetId: z.string().min(1) })
 const ERROR_TO_HTTP: Record<RunAnalysisError, number> = {
   unauthorized: 401,
   target_not_found: 404,
-  target_not_ready: 409,
+  not_enough_sessions: 409,
   previous_recs_open: 409,
   monthly_limit: 429,
   race_condition: 409,

@@ -21,7 +21,7 @@ export function normalizeDomain(input: string): string {
 // Допустимы: a-z, 0-9, точка, дефис.
 // IDN (xn--*) — пройдёт, потому что Punycode = ASCII.
 // Сами кириллические домены (вебмонитор.рф) ввести нельзя — вход должен
-// быть в Punycode (xn--80aje0afkgi.xn--p1ai).
+// быть в Punycode (xn--90abjntggcss.xn--p1ai).
 export function validateDomain(normalized: string): string {
   if (!/^[a-z0-9.-]+$/.test(normalized)) {
     throw new Error(

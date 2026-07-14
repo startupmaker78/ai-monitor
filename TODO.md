@@ -369,9 +369,12 @@ pagehide (ненадёжен: iOS Safari часто отбрасывает), л�
 - **[минор] buffer.ts коммент `MAX_BODY_BYTES`**
   ([buffer.ts:61](tracker-src/buffer.ts#L61)) — константа переименована
   в `MAX_WIRE_BYTES`; косметика. *(СДЕЛАНО d77e053.)*
-- **[минор/tech-debt] Неверный punycode `xn--80aje0afkgi.xn--p1ai`**
+- **[✅ СДЕЛАНО 2026-07-14] Неверный punycode `xn--80aje0afkgi.xn--p1ai`**
   (декодируется в `естрноаж.рф` — мусор, НЕ вебмонитор.рф). Найден
-  2026-07-13 при унификации сниппета. Места:
+  2026-07-13 при унификации сниппета. Исправлен на проверенный node
+  `xn--90abjntggcss.xn--p1ai` в обоих живых местах (claude-client.ts:8,
+  site-utils.ts). grep-аудит: только эти 2 живых места + описательные
+  упоминания в TODO/DECISIONS (не трогаем — история/трекинг). Места:
   - `lib/claude-client.ts:8` `REFERER_URL` — шлётся как `Referer` к
     Claude/OpenRouter API. Функц. безвредно (Referer не валидируется),
     но неверно.
@@ -430,8 +433,9 @@ pagehide (ненадёжен: iOS Safari часто отбрасывает), л�
 
 **Бэклог:**
 
-- [минор] неверный punycode `xn--80aje0afkgi` в `claude-client.ts:8` +
-  `site-utils.ts:23` (см. выше; чинить + grep-аудит).
+- [✅ СДЕЛАНО 2026-07-14] неверный punycode `xn--80aje0afkgi` в
+  `claude-client.ts:8` + `site-utils.ts` — исправлен на
+  `xn--90abjntggcss.xn--p1ai` (см. выше).
 - [watch] mobile-снапшот + pagehide-надёжность — ждут органического
   трафика (n≈0 post-fix).
 

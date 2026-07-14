@@ -5,7 +5,7 @@
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 const CLAUDE_MODEL = "anthropic/claude-opus-4-7"
 const DEFAULT_MAX_TOKENS = 4096
-const REFERER_URL = "https://staging.xn--80aje0afkgi.xn--p1ai" // Punycode for staging.вебмонитор.рф
+const REFERER_URL = "https://staging.xn--90abjntggcss.xn--p1ai" // Punycode for staging.вебмонитор.рф (проверено node: toUnicode → вебмонитор.рф)
 const APP_TITLE = "Webmonitor"
 
 export type ClaudeMessage = {

@@ -18,7 +18,6 @@ export type RunAnalysisError =
   | "target_not_found"
   | "not_enough_sessions"
   | "no_sessions"
-  | "previous_recs_open"
   | "monthly_limit"
   | "race_condition"
   | "provider_denied"
@@ -73,28 +72,16 @@ export async function runAnalysis(
     }
   }
 
-  // 4. Топ-10 предыдущего DONE-анализа должны быть закрыты.
-  const lastDone = await prisma.analysis.findFirst({
-    where: { targetId, status: "DONE" },
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  })
-  if (lastDone) {
-    const openCount = await prisma.recommendation.count({
-      where: {
-        analysisId: lastDone.id,
-        sortOrder: { lte: 10 },
-        status: { in: ["NEW", "IN_PROGRESS"] },
-      },
-    })
-    if (openCount > 0) {
-      return {
-        ok: false,
-        error: "previous_recs_open",
-        message: `Сначала обработайте ${openCount} ${pluralRecs(openCount)} из предыдущего анализа этой цели.`,
-      }
-    }
-  }
+  // 4. (Гейт «обработай top-10 предыдущего анализа» УБРАН 2026-07-15.)
+  // Он требовал перевести top-10 рекомендаций последнего DONE-анализа в
+  // DONE/REJECTED перед новым запуском. НО в приложении нет UI/API смены
+  // статуса рекомендации — они создаются всегда `NEW` и никогда не
+  // меняются → гейт был НЕУДОВЛЕТВОРИМ → любая цель блокировалась
+  // НАВСЕГДА после первого DONE-анализа (дедлок; противоречил Модели B
+  // «свобода запуска»). Экономический ограничитель остаётся — месячный
+  // лимит анализов на сайт (шаг 5, ниже). Мягкий гейт (предупреждение,
+  // не блок) можно вернуть ВМЕСТЕ с UI обработки рекомендаций — см. TODO
+  // «UI управления рекомендациями».
 
   // 5. Месячный лимит анализов на сайт.
   const now = new Date()
@@ -413,15 +400,6 @@ function claudeRetriableMessage(error: string): string {
     default:
       return "Claude API временно недоступен. Попробуйте через минуту."
   }
-}
-
-function pluralRecs(n: number): string {
-  const abs = Math.abs(n) % 100
-  if (abs > 10 && abs < 20) return "рекомендаций"
-  const last = abs % 10
-  if (last === 1) return "рекомендацию"
-  if (last >= 2 && last <= 4) return "рекомендации"
-  return "рекомендаций"
 }
 
 // MetricsSnapshot.bounceRate — Prisma Decimal. В Prisma 7 selected scalar

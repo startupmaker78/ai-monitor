@@ -11,9 +11,30 @@ const SESSION_CONCURRENCY = 10 // параллельные сессии в colle
 const INCOMPLETE_GRACE_MS = 30 * 60 * 1000 // 30 мин — после этого
 // сессию считаем «брошенной» юзером и берём в анализ даже без endedAt
 
+// 6.3b параметры извлечения кликов.
+const MAX_CLICKS = 50 // потолок кликов в summary (ограничивает промпт)
+const TEXT_CAP = 80 // макс длина clicks[].text (видимая метка элемента)
+const RAGE_MIN = 3 // ≥3 клика по одному узлу…
+const RAGE_WINDOW_MS = 1000 // …в окне 1000мс = rage
+const DEAD_WINDOW_MS = 2500 // клик без Mutation в окне [t, t+2500мс] = dead.
+// Включаем тот же мс (реакция клик-хендлера часто с тем же timestamp) и
+// до 2.5с (анимации/отложенный рендер). Эвристика мягкая — сигнал, не факт.
+
 type StoredPacket = {
   packetIndex: number
   events: Array<{ type: number; data: unknown; timestamp: number }>
+}
+
+// Сериализованный rrweb-узел (rrweb-snapshot NodeType: 0=Document,
+// 2=Element, 3=Text). Element несёт tagName/attributes/childNodes/id;
+// Text — textContent.
+type SerNode = {
+  type?: number
+  id?: number
+  tagName?: string
+  attributes?: Record<string, unknown>
+  textContent?: string
+  childNodes?: SerNode[]
 }
 
 // re-apply на main 2026-07-15: поле `incomplete` вынесено из объекта
@@ -82,32 +103,44 @@ export async function extractSessionSummary(
     return { ok: false, reason: "corrupted_json" }
   }
 
-  // Один проход по всем events.
+  // Один проход: viewport, scroll, FullSnapshot-дерево, мутации, клики.
+  // Node-id-map строим ПОСЛЕ (по FullSnapshot + Mutation-adds).
   let viewportWidth: number | null = null
   let viewportHeight: number | null = null
   let maxScrollY = 0
   let sawScrollEvent = false
   let lastTimestampMs = options.sessionStartedAtMs
 
+  let fullSnapshotRoot: SerNode | null = null
+  const mutationAdds: SerNode[] = []
+  const mutationTimestamps: number[] = []
+  const clickEvents: Array<{ id: number; timestamp: number }> = []
+
   for (const packet of packets) {
     if (!Array.isArray(packet.events)) continue
     for (const ev of packet.events) {
       if (typeof ev !== "object" || ev === null) continue
-      const evObj = ev as { type?: unknown; data?: unknown; timestamp?: unknown }
-
-      if (typeof evObj.timestamp === "number") {
-        if (evObj.timestamp > lastTimestampMs) {
-          lastTimestampMs = evObj.timestamp
-        }
+      const evObj = ev as {
+        type?: unknown
+        data?: unknown
+        timestamp?: unknown
       }
+      const ts = typeof evObj.timestamp === "number" ? evObj.timestamp : null
+      if (ts !== null && ts > lastTimestampMs) lastTimestampMs = ts
 
       const type = evObj.type
       const data = (evObj.data as Record<string, unknown> | null) ?? null
       if (data === null) continue
 
-      // Meta event (rrweb type=4): emitted at start and on URL change.
-      // В современных rrweb (нашa @rrweb/record 2.0) data содержит
-      // {href, width, height} — width/height = window.inner*.
+      // type=2 FullSnapshot: DOM-дерево (data.node = корень Document).
+      if (type === 2) {
+        const node = (data as { node?: unknown }).node
+        if (node && typeof node === "object") {
+          fullSnapshotRoot = node as SerNode
+        }
+      }
+
+      // type=4 Meta: viewport (width/height = window.inner*).
       if (type === 4) {
         if (viewportWidth === null && typeof data.width === "number") {
           viewportWidth = data.width
@@ -117,7 +150,7 @@ export async function extractSessionSummary(
         }
       }
 
-      // IncrementalSnapshot (type=3) — разделяется по data.source.
+      // type=3 IncrementalSnapshot — по data.source.
       if (type === 3) {
         const source = data.source
         // source 3 = Scroll. data.y — scrollTop.
@@ -125,40 +158,98 @@ export async function extractSessionSummary(
           sawScrollEvent = true
           if (data.y > maxScrollY) maxScrollY = data.y
         }
-        // source 4 = ViewportResize. Обновляем viewport — реальный размер
-        // окна изменился (поворот устройства, ресайз).
+        // source 4 = ViewportResize (поворот/ресайз).
         if (source === 4) {
           if (typeof data.width === "number") viewportWidth = data.width
           if (typeof data.height === "number") viewportHeight = data.height
         }
+        // source 0 = Mutation: adds → пополняют node-id-map (клик мог
+        // прийтись по узлу, добавленному после снапшота); timestamp →
+        // dead-click эвристика (реагировала ли страница).
+        if (source === 0) {
+          if (ts !== null) mutationTimestamps.push(ts)
+          const adds = (data as { adds?: unknown }).adds
+          if (Array.isArray(adds)) {
+            for (const a of adds) {
+              const n = (a as { node?: unknown })?.node
+              if (n && typeof n === "object") mutationAdds.push(n as SerNode)
+            }
+          }
+        }
+        // source 2 = MouseInteraction; data.type=2 = Click. На мобильных
+        // реальные тапы приходят как Click(2) тоже (браузер эмитит click
+        // после тапа). TouchStart(7) НЕ считаем кликом — он срабатывает
+        // на старте ЛЮБОГО касания, включая скролл-жест (у нас сотни
+        // scroll-событий), и раздул бы клики мусором.
+        if (
+          source === 2 &&
+          data.type === 2 &&
+          typeof data.id === "number" &&
+          ts !== null
+        ) {
+          clickEvents.push({ id: data.id, timestamp: ts })
+        }
       }
-
-      // Unknown event types — пропускаем тихо. rrweb добавляет/меняет
-      // структуру между версиями, валить сессию на этом не хотим.
     }
   }
 
   // Если viewport так и не определился — возвращаем no_full_snapshot.
-  // Имя reason остаётся даже когда формально дело не во FullSnapshot,
-  // а в отсутствии любого источника viewport — это «не хватает базовой
-  // информации о сессии».
   if (viewportWidth === null || viewportHeight === null) {
     return { ok: false, reason: "no_full_snapshot" }
+  }
+
+  // ── Node-id-map: индексируем элементы FullSnapshot + добавленные
+  // мутациями. Текст извлекаем лениво только для кликнутых узлов (O(n)
+  // индексация + O(subtree) на клик, кликов единицы).
+  const nodeById = new Map<number, SerNode>()
+  if (fullSnapshotRoot) indexNodes(fullSnapshotRoot, nodeById)
+  for (const add of mutationAdds) indexNodes(add, nodeById)
+
+  // Клики → {selector, text, timeMs} (timeMs — офсет от старта сессии).
+  const clicks = clickEvents.slice(0, MAX_CLICKS).map((c) => {
+    const n = nodeById.get(c.id)
+    return {
+      selector: n ? selectorFor(n) : `unknown#${c.id}`,
+      text: n ? elementText(n, TEXT_CAP) : "",
+      timeMs: Math.max(0, Math.round(c.timestamp - options.sessionStartedAtMs)),
+    }
+  })
+
+  // Rage: ≥RAGE_MIN кликов по одному узлу в окне RAGE_WINDOW_MS.
+  const rageClicks = detectRageClicks(
+    clickEvents,
+    nodeById,
+    options.sessionStartedAtMs,
+  )
+
+  // Dead: клик без Mutation(source0) в окне DEAD_WINDOW_MS после него.
+  const sortedMut = mutationTimestamps.slice().sort((a, b) => a - b)
+  let deadClicks = 0
+  for (const c of clickEvents) {
+    if (!hasMutationAfter(sortedMut, c.timestamp, DEAD_WINDOW_MS)) deadClicks++
+  }
+
+  // Exit: последний клик перед концом сессии → selector.
+  const lastClick = clickEvents.reduce<{ id: number; timestamp: number } | null>(
+    (acc, c) => (acc === null || c.timestamp > acc.timestamp ? c : acc),
+    null,
+  )
+  let exitElement: string | null = null
+  if (lastClick) {
+    const n = nodeById.get(lastClick.id)
+    exitElement = n ? selectorFor(n) : `unknown#${lastClick.id}`
   }
 
   const userAgent = options.userAgent
   const deviceType = classifyDevice(viewportWidth, userAgent)
 
-  // FIXME 6.3b: docHeight = viewport.height — это приближение, не
-  // реальная DOM scrollHeight. После DOM-reconstruction в коммите 6.3b
-  // заменить на scrollHeight извлечённую из FullSnapshot html-узла.
-  // До этого scrollDepth по сути значит "проскроллил ли ниже первого
-  // экрана", а не "% страницы прокручено".
+  // FIXME 6.3b: docHeight = viewport.height — приближение (нет серверного
+  // layout → истинный scrollHeight недоступен даже после rebuild).
+  // scrollDepth здесь = «на сколько экранов проскроллил» (clamp 0..1),
+  // а не точный % страницы. Достаточно для сигнала «дочитал/не дочитал».
   const docHeight = viewportHeight
   const scrollDepth = sawScrollEvent ? clamp(maxScrollY / docHeight, 0, 1) : 0
 
-  // duration. Если в БД endedAt был — берём оттуда. Иначе по последнему
-  // событию (incomplete=true).
   const incomplete = options.sessionEndedAtMsFromDb === null
   const endMs = options.sessionEndedAtMsFromDb ?? lastTimestampMs
   const duration = Math.max(
@@ -171,13 +262,12 @@ export async function extractSessionSummary(
     deviceType,
     viewport: `${viewportWidth}x${viewportHeight}`,
     scrollDepth: round2(scrollDepth),
-    clicks: [], // 6.3b
+    clicks,
     formInteractions: [], // 6.3c
-    rageClicks: [], // 6.3b
-    deadClicks: 0, // 6.3b
-    exitElement: null, // 6.3b
-    // TODO: error tracking — отдельный коммит после MVP, нужны
-    // window.addEventListener('error') в трекере.
+    rageClicks,
+    deadClicks,
+    exitElement,
+    // TODO: error tracking — отдельный коммит, нужен window.onerror в трекере.
     errors: [],
   }
 
@@ -231,7 +321,102 @@ export async function collectSessionsForAnalysis(
   return summaries.slice(0, options.limit)
 }
 
-// ─── helpers ──────────────────────────────────────────────────────────
+// ─── node-id-map helpers (6.3b) ─────────────────────────────────────────
+
+function indexNodes(node: SerNode, map: Map<number, SerNode>): void {
+  if (!node || typeof node !== "object") return
+  if (node.type === 2 && typeof node.id === "number") {
+    map.set(node.id, node)
+  }
+  const kids = node.childNodes
+  if (Array.isArray(kids)) {
+    for (const c of kids) indexNodes(c, map)
+  }
+}
+
+// Идентифицирующий (не полный путь) CSS-селектор: tag#id / tag.class / tag.
+// Для AI важнее «.t-btn "Записаться"», чем «div>div>div», поэтому текст
+// элемента (elementText) несёт основной сигнал, а селектор — вспомогательный.
+function selectorFor(n: SerNode): string {
+  const tag = String(n.tagName || "node").toLowerCase()
+  const attrs = n.attributes || {}
+  const idAttr = attrs.id
+  if (typeof idAttr === "string" && idAttr.trim()) {
+    return `${tag}#${idAttr.trim()}`
+  }
+  const cls = attrs.class
+  if (typeof cls === "string" && cls.trim()) {
+    const first = cls.trim().split(/\s+/)[0]
+    if (first) return `${tag}.${first}`
+  }
+  return tag
+}
+
+// Видимый текст элемента: конкатенация textContent всех текстовых узлов
+// поддерева (метка кнопки может быть во вложенном span), схлопнуть
+// пробелы, обрезать до cap.
+function elementText(n: SerNode, cap: number): string {
+  let out = ""
+  const stack: SerNode[] = [n]
+  while (stack.length > 0 && out.length < cap * 2) {
+    const cur = stack.shift()
+    if (!cur) continue
+    if (cur.type === 3 && typeof cur.textContent === "string") {
+      out += cur.textContent + " "
+    }
+    const kids = cur.childNodes
+    if (Array.isArray(kids)) stack.push(...kids)
+  }
+  return out.replace(/\s+/g, " ").trim().slice(0, cap)
+}
+
+// Есть ли Mutation-timestamp в окне [t, t+windowMs]. sortedTs — по возр.
+// Включаем t (реакция клика часто с тем же timestamp — иначе консент-
+// клик, удаливший баннер в тот же мс, ложно попал бы в dead).
+function hasMutationAfter(
+  sortedTs: number[],
+  t: number,
+  windowMs: number,
+): boolean {
+  for (const m of sortedTs) {
+    if (m < t) continue
+    return m <= t + windowMs // первый m≥t: в окне → true, иначе → false
+  }
+  return false
+}
+
+function detectRageClicks(
+  clickEvents: Array<{ id: number; timestamp: number }>,
+  nodeById: Map<number, SerNode>,
+  startMs: number,
+): Array<{ selector: string; count: number; timeMs: number }> {
+  const byId = new Map<number, number[]>()
+  for (const c of clickEvents) {
+    const arr = byId.get(c.id) ?? []
+    arr.push(c.timestamp)
+    byId.set(c.id, arr)
+  }
+  const out: Array<{ selector: string; count: number; timeMs: number }> = []
+  for (const [id, tsArr] of Array.from(byId.entries())) {
+    tsArr.sort((a, b) => a - b)
+    let i = 0
+    for (let j = 0; j < tsArr.length; j++) {
+      while (tsArr[j] - tsArr[i] > RAGE_WINDOW_MS) i++
+      if (j - i + 1 >= RAGE_MIN) {
+        const n = nodeById.get(id)
+        out.push({
+          selector: n ? selectorFor(n) : `unknown#${id}`,
+          count: j - i + 1,
+          timeMs: Math.max(0, Math.round(tsArr[i] - startMs)),
+        })
+        break // одна rage-запись на узел
+      }
+    }
+  }
+  return out
+}
+
+// ─── sampling / device helpers ──────────────────────────────────────────
 
 type SessionForUaSample = { userAgent: string | null }
 

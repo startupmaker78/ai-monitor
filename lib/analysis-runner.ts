@@ -4,6 +4,7 @@ import {
   buildAnalysisPrompt,
   parseRecommendations,
   type AnalysisInput,
+  type SessionSummary,
 } from "@/lib/analysis-prompt"
 import {
   collectSessionsForAnalysis,
@@ -18,6 +19,7 @@ export type RunAnalysisError =
   | "target_not_found"
   | "not_enough_sessions"
   | "no_sessions"
+  | "collect_timeout"
   | "monthly_limit"
   | "race_condition"
   | "provider_denied"
@@ -36,6 +38,9 @@ export type RunAnalysisResult =
     }
 
 const MAX_TOKENS = 8000
+// Общий cap на сбор сессий из S3 (6.3d). Ниже Gateway-лимита 300с →
+// падаем чисто до 504 и markFailed возвращает цель в ACTIVE.
+const COLLECT_TIMEOUT_MS = 60_000
 
 export async function runAnalysis(
   userId: string,
@@ -167,9 +172,36 @@ export async function runAnalysis(
   // текст кликнутого элемента может содержать ПД → при подключении таких
   // сайтов: стрипать/резать clicks[].text или per-site-конфиг. Сейчас
   // (academy, публичные курсы) не актуально.
-  const sessionSummaries = await collectSessionsForAnalysis(targetId, {
-    limit: MAX_SESSIONS_PER_ANALYSIS,
-  })
+  // Таймаут сбора 60с + markFailed при сбое/зависании (защита от
+  // инцидента 2026-07-15: S3-сбор завис >300с → Gateway 504 → цель
+  // застряла в ANALYZING, т.к. процесс убит СНАРУЖИ до любого catch).
+  // 60с < 300с Gateway → падаем чисто ДО 504, markFailed возвращает цель
+  // в ACTIVE. Дополняет per-request S3-таймауты (lib/storage.ts): даже
+  // если те не сработают — общий cap не даст зависнуть.
+  let sessionSummaries: SessionSummary[]
+  try {
+    sessionSummaries = await withTimeout(
+      collectSessionsForAnalysis(targetId, {
+        limit: MAX_SESSIONS_PER_ANALYSIS,
+      }),
+      COLLECT_TIMEOUT_MS,
+      "session_collection",
+    )
+  } catch (err) {
+    console.error("[analysis-runner] session collection failed/timed out", {
+      analysisId: analysis.id,
+      targetId,
+      err: (err as Error).message,
+    })
+    await markFailed(analysis.id, targetId)
+    return {
+      ok: false,
+      error: "collect_timeout",
+      message:
+        "Не удалось собрать сессии за отведённое время. Попробуйте ещё раз.",
+      analysisId: analysis.id,
+    }
+  }
 
   // Фолбэк (боевой путь): если ни одной валидной сессии не собралось
   // (все corrupted / no_full_snapshot / недоступны в S3) — анализировать
@@ -488,4 +520,23 @@ async function markFailed(
         e,
       )
     })
+}
+
+// Общий таймаут на промис: Promise.race с таймером. НЕ отменяет
+// underlying-работу (S3-запросы завершатся по своим per-request
+// таймаутам из lib/storage.ts), но гарантирует, что вызывающий не
+// зависнет дольше ms. clearTimeout в finally — не течём таймерами.
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`timeout:${label} after ${ms}ms`)),
+      ms,
+    )
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }

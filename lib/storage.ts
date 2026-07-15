@@ -7,6 +7,8 @@ import {
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import { NodeHttpHandler } from "@smithy/node-http-handler"
+import { Agent } from "https"
 
 type RequiredEnv =
   | "YOS_BUCKET_NAME"
@@ -39,6 +41,20 @@ function createS3Client(): S3Client {
       secretAccessKey: readRequiredEnv("YOS_SECRET_ACCESS_KEY"),
     },
     forcePathStyle: true,
+    // Явные таймауты + пул сокетов. Дефолт AWS SDK v3 — БЕЗ таймаутов
+    // (бесконечное ожидание): подвисший сокет к YOS из контейнера висел
+    // вечно → пре-процессор (до 50 параллельных getJson) деадлочил на
+    // >300с, Gateway отдавал 504 (инцидент 2026-07-15). Теперь подвисшее
+    // соединение падает за 3-10с → SDK ретраит (self-heal transient) или
+    // чисто ошибается. maxSockets 64 > 50 concurrent (SESSION×PACKET) =
+    // запас в пуле. Величины безопасны для всех операций: пакеты ≤~3 MiB
+    // (putJson/getJson) уходят за секунды; presigned-URL генерится
+    // локально (сети нет); list/delete — мелкие. keepAlive — переиспольз.
+    requestHandler: new NodeHttpHandler({
+      connectionTimeout: 3000,
+      requestTimeout: 10000,
+      httpsAgent: new Agent({ keepAlive: true, maxSockets: 64 }),
+    }),
   })
 }
 

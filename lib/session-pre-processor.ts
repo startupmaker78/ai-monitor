@@ -357,9 +357,32 @@ export async function collectSessionsForAnalysis(
   )
 
   const summaries: SessionSummary[] = []
-  for (const r of results) {
-    if (r.ok) summaries.push(r.summary)
+  const counts = {
+    corrupted_json: 0,
+    no_full_snapshot: 0,
+    no_packets: 0,
+    incomplete: 0,
   }
+  for (const r of results) {
+    if (r.ok) {
+      summaries.push(r.summary)
+      if (r.incomplete) counts.incomplete++
+    } else {
+      counts[r.reason]++
+    }
+  }
+  // Observability: сколько запрошено/сэмплировано/собрано/пропущено — для
+  // диагностики боевого анализа (6.3d).
+  console.log("[session-pre-processor] collectSessionsForAnalysis", {
+    targetId,
+    queried: sessions.length,
+    sampled: sampled.length,
+    ok: summaries.length,
+    incomplete: counts.incomplete,
+    skipped_corrupted: counts.corrupted_json,
+    skipped_no_full_snapshot: counts.no_full_snapshot,
+    skipped_no_packets: counts.no_packets,
+  })
   return summaries.slice(0, options.limit)
 }
 

@@ -5,7 +5,10 @@ import {
   parseRecommendations,
   type AnalysisInput,
 } from "@/lib/analysis-prompt"
-import { buildMockAnalysisInput } from "@/lib/mock-session-data"
+import {
+  collectSessionsForAnalysis,
+  MAX_SESSIONS_PER_ANALYSIS,
+} from "@/lib/session-pre-processor"
 import { getEffectiveTier } from "@/lib/tier-limits"
 import { validateSiteOwnership } from "@/lib/site-data"
 import { getMinSessionsBudget } from "@/lib/config"
@@ -14,6 +17,7 @@ export type RunAnalysisError =
   | "unauthorized"
   | "target_not_found"
   | "not_enough_sessions"
+  | "no_sessions"
   | "previous_recs_open"
   | "monthly_limit"
   | "race_condition"
@@ -151,15 +155,67 @@ export async function runAnalysis(
     },
   })
 
-  // 9. Сборка AnalysisInput: реальные target/site/metrics, mock сессии (6.4).
-  // Реальные rrweb-summary появятся в 6.3.
-  const mock = buildMockAnalysisInput()
+  // 9. Реальные rrweb-summary (этап 6.3d, замена моков). Пре-процессор
+  // скачивает S3-пакеты сессий цели и дистиллирует каждую в SessionSummary.
+  // Лимит 50 сессий/анализ (DECISIONS 2026-05-07) — через MAX_SESSIONS_
+  // PER_ANALYSIS; сбор параллельный (concurrency в пре-процессоре).
+  // `incomplete` (брошенная сессия) НЕ передаём в промпт — поведенческие
+  // сигналы важнее чистого закрытия, а прайм-структуру не меняем; флаг
+  // остаётся в ExtractResult для будущей observability.
+  //
+  // ── 152-ФЗ: ЧТО уходит в Claude через CF AI Gateway (США) ──────────────
+  // В промпт (JSON.stringify sessionSummaries) идут ТОЛЬКО:
+  //   • clicks[].text — публичный текст элементов страницы («Я согласен»,
+  //     «Программы»); НЕ данные посетителя;
+  //   • formInteractions[].field — placeholder/name полей («Email»,«phone»)
+  //     = метаданные формы (публичный контент), НЕ введённые значения;
+  //   • selector'ы (exit/rage/clicks), viewport, deviceType, duration,
+  //     scrollDepth, rage/dead — поведенческие метрики.
+  // НЕ уходит: FullSnapshot (весь DOM), ipHash, userAgent, ЗНАЧЕНИЯ полей
+  // (rrweb маскирует + пре-процессор их не читает). URL цели — публичный
+  // path (query срезан normalizeUrl).
+  // На academy это публичный контент страницы, НЕ ПД посетителя.
+  // ⚠️ ВЕКТОР НА БУДУЩЕЕ: clicks[].text безопасен на публичных/статичных
+  // страницах, но на ПЕРСОНАЛИЗИРОВАННЫХ (ЛК, где в DOM имя/email юзера)
+  // текст кликнутого элемента может содержать ПД → при подключении таких
+  // сайтов: стрипать/резать clicks[].text или per-site-конфиг. Сейчас
+  // (academy, публичные курсы) не актуально.
+  const sessionSummaries = await collectSessionsForAnalysis(targetId, {
+    limit: MAX_SESSIONS_PER_ANALYSIS,
+  })
+
+  // Фолбэк (боевой путь): если ни одной валидной сессии не собралось
+  // (все corrupted / no_full_snapshot / недоступны в S3) — анализировать
+  // нечего. Модель B: markFailed возвращает цель в сбор, юзер повторит.
+  // NB: сессий может быть <5 (часть отсеялась) — это НЕ ошибка, анализ
+  // идёт на том что есть (гейт ≥5 отработал на уровне collected цели).
+  if (sessionSummaries.length === 0) {
+    console.error("[analysis-runner] no analyzable sessions", {
+      analysisId: analysis.id,
+      targetId,
+    })
+    await markFailed(analysis.id, targetId)
+    return {
+      ok: false,
+      error: "no_sessions",
+      message:
+        "Не удалось собрать сессии для анализа (данные повреждены или недоступны). Попробуйте позже.",
+      analysisId: analysis.id,
+    }
+  }
+
+  console.log("[analysis-runner] real sessions collected for analysis", {
+    analysisId: analysis.id,
+    targetId,
+    sessionsCount: sessionSummaries.length,
+  })
+
   const input: AnalysisInput = {
     target: { url: target.url, name: target.name },
     site: { domain: target.site.domain, isDemo: target.site.isDemo },
     metrics: aggregateMetrics(snapshots),
-    sessionsCount: mock.sessionSummaries.length,
-    sessionSummaries: mock.sessionSummaries,
+    sessionsCount: sessionSummaries.length,
+    sessionSummaries,
   }
 
   // 10. Промпт.

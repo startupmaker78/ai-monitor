@@ -19,6 +19,10 @@ const RAGE_WINDOW_MS = 1000 // …в окне 1000мс = rage
 const DEAD_WINDOW_MS = 2500 // клик без Mutation в окне [t, t+2500мс] = dead.
 // Включаем тот же мс (реакция клик-хендлера часто с тем же timestamp) и
 // до 2.5с (анимации/отложенный рендер). Эвристика мягкая — сигнал, не факт.
+const MAX_FORM_FIELDS = 20 // потолок полей формы в summary
+// Реальные поля ввода (Focus/Blur ловятся и на кнопках/ссылках — их не
+// считаем полями формы).
+const FORM_TAGS = new Set(["input", "textarea", "select"])
 
 type StoredPacket = {
   packetIndex: number
@@ -115,6 +119,12 @@ export async function extractSessionSummary(
   const mutationAdds: SerNode[] = []
   const mutationTimestamps: number[] = []
   const clickEvents: Array<{ id: number; timestamp: number }> = []
+  // 6.3c: Focus/Blur (MouseInteraction type 5/6) + Input (source 5).
+  // Храним только node id — контент ввода (data.text) НЕ читаем (152-ФЗ:
+  // поле-only, никаких данных юзера).
+  const focusIds = new Set<number>()
+  const blurIds = new Set<number>()
+  const inputIds = new Set<number>()
 
   for (const packet of packets) {
     if (!Array.isArray(packet.events)) continue
@@ -189,6 +199,16 @@ export async function extractSessionSummary(
         ) {
           clickEvents.push({ id: data.id, timestamp: ts })
         }
+        // source 2, type 5 = Focus / type 6 = Blur (по node id поля).
+        if (source === 2 && typeof data.id === "number") {
+          if (data.type === 5) focusIds.add(data.id)
+          if (data.type === 6) blurIds.add(data.id)
+        }
+        // source 5 = Input (факт ввода в поле). data.text маскирован rrweb
+        // и НЕ читается — берём только id (152-ФЗ: поле-only).
+        if (source === 5 && typeof data.id === "number") {
+          inputIds.add(data.id)
+        }
       }
     }
   }
@@ -229,6 +249,28 @@ export async function extractSessionSummary(
     if (!hasMutationAfter(sortedMut, c.timestamp, DEAD_WINDOW_MS)) deadClicks++
   }
 
+  // 6.3c: formInteractions — только по реальным ПОЛЯМ ВВОДА. Focus/Blur
+  // (source2 type5/6) срабатывают на ЛЮБОМ фокусируемом элементе (кнопки,
+  // ссылки), поэтому фильтруем по tagName ∈ {input, textarea, select} —
+  // иначе кнопка/ссылка ложно попадёт как «брошенное поле». blurredEmpty
+  // = поле фокусировали и покинули (focus+blur) БЕЗ ввода (нет Input) →
+  // форма отпугнула. Поле с Input → blurredEmpty=false (юзер набрал).
+  const fieldIds = new Set<number>([
+    ...Array.from(focusIds),
+    ...Array.from(blurIds),
+    ...Array.from(inputIds),
+  ])
+  const formInteractions = Array.from(fieldIds)
+    .map((id) => ({ id, node: nodeById.get(id) }))
+    .filter(
+      (x) => x.node && FORM_TAGS.has(String(x.node.tagName || "").toLowerCase()),
+    )
+    .slice(0, MAX_FORM_FIELDS)
+    .map(({ id, node }) => ({
+      field: fieldNameFor(node, id),
+      blurredEmpty: focusIds.has(id) && blurIds.has(id) && !inputIds.has(id),
+    }))
+
   // Exit: последний клик перед концом сессии → selector.
   const lastClick = clickEvents.reduce<{ id: number; timestamp: number } | null>(
     (acc, c) => (acc === null || c.timestamp > acc.timestamp ? c : acc),
@@ -263,7 +305,7 @@ export async function extractSessionSummary(
     viewport: `${viewportWidth}x${viewportHeight}`,
     scrollDepth: round2(scrollDepth),
     clicks,
-    formInteractions: [], // 6.3c
+    formInteractions,
     rageClicks,
     deadClicks,
     exitElement,
@@ -350,6 +392,23 @@ function selectorFor(n: SerNode): string {
     if (first) return `${tag}.${first}`
   }
   return tag
+}
+
+// Имя поля формы для AI. Приоритет: placeholder (видимая метка, что юзер
+// реально видел) → name → type → селектор. ВСЁ это — метаданные формы
+// (публичный контент страницы), НЕ данные юзера: 152-ФЗ-safe.
+function fieldNameFor(n: SerNode | undefined, id: number): string {
+  if (!n) return `unknown#${id}`
+  const attrs = n.attributes || {}
+  const ph = attrs.placeholder
+  if (typeof ph === "string" && ph.trim()) return ph.trim().slice(0, 40)
+  const name = attrs.name
+  if (typeof name === "string" && name.trim()) return name.trim().slice(0, 40)
+  const t = attrs.type
+  if (typeof t === "string" && t.trim()) {
+    return `${String(n.tagName || "input").toLowerCase()}[type=${t.trim()}]`
+  }
+  return selectorFor(n)
 }
 
 // Видимый текст элемента: конкатенация textContent всех текстовых узлов

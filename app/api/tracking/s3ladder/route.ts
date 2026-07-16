@@ -3,7 +3,7 @@
 // проверяем (а) параллельный listKeys и (б) ПРЯМОЙ collectSessionsForAnalysis
 // в контейнере (воспроизведение зависона сбора). Guard CRON_SECRET.
 import { NextRequest, NextResponse } from "next/server"
-import { listKeys, getJson } from "@/lib/storage"
+import { listKeys } from "@/lib/storage"
 import { collectSessionsForAnalysis } from "@/lib/session-pre-processor"
 
 export const runtime = "nodejs"

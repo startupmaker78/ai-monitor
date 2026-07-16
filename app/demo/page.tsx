@@ -141,10 +141,10 @@ export default async function DemoPage() {
         <div>
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold tracking-tight">
-              Топ-10 рекомендаций
+              Примеры рекомендаций
             </h2>
             <span className="text-sm text-muted-foreground">
-              Самые приоритетные правки
+              Что вебмонитор находит в поведении посетителей
             </span>
           </div>
           <div className="grid gap-4 md:grid-cols-2">

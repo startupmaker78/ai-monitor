@@ -6,7 +6,6 @@ import { getDashboardData } from "@/lib/dashboard-data"
 import { DEMO_TIER } from "@/lib/demo-tier-info"
 import { KpiCard } from "@/components/dashboard/kpi-card"
 import { VisitsChart } from "@/components/dashboard/visits-chart"
-import { RecommendationCard } from "@/components/dashboard/recommendation-card"
 import { TierBadge } from "@/components/dashboard/tier-badge"
 import { UsageWidget } from "@/components/dashboard/usage-widget"
 import { TargetsList } from "@/components/dashboard/targets-list"
@@ -131,12 +130,17 @@ export default async function DashboardPage() {
           description="На сайте, мин:сек"
           icon={Clock}
         />
-        <KpiCard
-          title="Активные рекомендации"
-          value={data.kpi.totalActive.toString()}
-          description={`🔴 ${data.priorityCounts.CRITICAL} · 🟡 ${data.priorityCounts.IMPORTANT} · 🟢 ${data.priorityCounts.GOOD}`}
-          icon={Lightbulb}
-        />
+        <Link
+          href="/dashboard/recommendations"
+          className="block rounded-xl transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <KpiCard
+            title="Активные рекомендации"
+            value={data.kpi.totalActive.toString()}
+            description={`🔴 ${data.priorityCounts.CRITICAL} · 🟡 ${data.priorityCounts.IMPORTANT} · 🟢 ${data.priorityCounts.GOOD}`}
+            icon={Lightbulb}
+          />
+        </Link>
       </div>
 
       <UsageWidget
@@ -152,22 +156,6 @@ export default async function DashboardPage() {
       <VisitsChart data={data.chart} />
 
       <TargetsList targets={data.targets} />
-
-      <div>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold tracking-tight">
-            Топ-10 рекомендаций
-          </h3>
-          <span className="text-sm text-muted-foreground">
-            Показаны самые приоритетные. Полный список — раздел «Рекомендации».
-          </span>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          {data.recommendations.map((rec) => (
-            <RecommendationCard key={rec.id} recommendation={rec} />
-          ))}
-        </div>
-      </div>
     </div>
   )
 }

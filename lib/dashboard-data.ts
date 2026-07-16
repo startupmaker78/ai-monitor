@@ -58,6 +58,12 @@ export async function getDashboardData(userId: string) {
     },
   })
 
+  // NB: список `recommendations` (ниже) на РЕАЛЬНОМ дашборде больше не
+  // показывается (блок «Топ-10» убран — врал: ≠10 и смешивал рекомендации
+  // разных целей). Но `getDashboardData` разделяется с ДЕМО-страницей
+  // (app/demo/page.tsx), которая всё ещё рендерит рекомендации как
+  // showcase — поэтому запрос СОХРАНЁН. Место для реальных рекомендаций —
+  // /dashboard/recommendations (per-target дропдаун).
   const topRecommendations = await prisma.recommendation.findMany({
     where: {
       analysis: { siteId: site.id },

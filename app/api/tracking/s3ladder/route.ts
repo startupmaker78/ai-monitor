@@ -1,26 +1,20 @@
 // ⚠️ TEMP ДИАГНОСТИЧЕСКИЙ РОУТ — УДАЛИТЬ ПОСЛЕ ЗАМЕРА.
-// Лесенка concurrency параллельного S3-чтения ИЗ КОНТЕЙНЕРА через наш
-// s3Client (с текущим requestHandler). Находит порог, на котором
-// параллельный getJson виснет (инцидент 2026-07-15: сбор 10-50 parallel
-// зависает, запись 1-за-раз работает). Guard по CRON_SECRET. Использует
-// РЕАЛЬНЫЕ ключи пакетов academy. НЕ ОСТАВЛЯТЬ В ПРОДЕ.
+// v2: getJson-ладдер показал что параллельный getJson OK до N=50. Теперь
+// проверяем (а) параллельный listKeys и (б) ПРЯМОЙ collectSessionsForAnalysis
+// в контейнере (воспроизведение зависона сбора). Guard CRON_SECRET.
 import { NextRequest, NextResponse } from "next/server"
 import { listKeys, getJson } from "@/lib/storage"
+import { collectSessionsForAnalysis } from "@/lib/session-pre-processor"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 const SITE = "cmrat2wcs00002u3cdg15w2t6"
-const LEVELS = [1, 3, 5, 10, 25, 50]
+const TARGET = "cmrcbpgcs0000o1lbihsba88g"
 const LEVEL_TIMEOUT_MS = 15000
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-// Promise.race с таймаутом — НЕ отменяет underlying (зависшие getJson
-// продолжат висеть в фоне, temp-роут это переживёт), но не даёт уровню
-// заблокировать замер.
 async function raceTimeout<T>(
   p: Promise<T>,
   ms: number,
@@ -38,62 +32,50 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    // 1) единичный listKeys (сам по себе read — если ЗАВИСНЕТ, это находка).
-    const lt0 = Date.now()
-    const listRes = await raceTimeout(
-      listKeys(`sessions/${SITE}/`),
-      LEVEL_TIMEOUT_MS,
+    const allKeys = await listKeys(`sessions/${SITE}/`)
+    // distinct session prefixes: sessions/{SITE}/{token}/
+    const prefixes = Array.from(
+      new Set(
+        allKeys
+          .map((k) => k.match(new RegExp(`^(sessions/${SITE}/[^/]+/)`))?.[1])
+          .filter((x): x is string => Boolean(x)),
+      ),
     )
-    const listMs = Date.now() - lt0
-    if (!listRes.done) {
-      return NextResponse.json({
-        listKeys: { ok: false, timedOut: true, ms: listMs },
-        note: "listKeys(single) завис >15с — read виснет даже для одного list",
-      })
-    }
-    const keys = listRes.value.slice(0, 60)
-    if (keys.length === 0) {
-      return NextResponse.json({ error: "no_keys", listMs })
-    }
 
-    // 2) лесенка getJson concurrency.
-    const ladder: Array<{
-      n: number
-      ok: boolean
-      timedOut: boolean
-      ms: number
-      succeeded?: number
-      failed?: number
-    }> = []
-    for (const n of LEVELS) {
-      const picked = Array.from({ length: n }, (_, i) => keys[i % keys.length])
+    // (а) ПАРАЛЛЕЛЬНЫЙ listKeys — по N разным session-префиксам одновременно.
+    const listLadder: Array<{ n: number; ok: boolean; timedOut: boolean; ms: number; succeeded?: number }> = []
+    for (const n of [1, 3, 5, 10]) {
+      const picked = prefixes.slice(0, n)
+      if (picked.length < n) break
       const t0 = Date.now()
       const res = await raceTimeout(
-        Promise.allSettled(picked.map((k) => getJson(k))),
+        Promise.allSettled(picked.map((pfx) => listKeys(pfx))),
         LEVEL_TIMEOUT_MS,
       )
       const ms = Date.now() - t0
       if (res.done) {
-        const succeeded = res.value.filter((x) => x.status === "fulfilled").length
-        ladder.push({
-          n,
-          ok: succeeded === n,
-          timedOut: false,
-          ms,
-          succeeded,
-          failed: n - succeeded,
-        })
+        listLadder.push({ n, ok: res.value.every((x) => x.status === "fulfilled"), timedOut: false, ms, succeeded: res.value.filter((x) => x.status === "fulfilled").length })
       } else {
-        ladder.push({ n, ok: false, timedOut: true, ms })
+        listLadder.push({ n, ok: false, timedOut: true, ms })
       }
-      await sleep(1000) // дать egress остыть между уровнями
+      await sleep(1000)
     }
 
+    // (б) ПРЯМОЙ collectSessionsForAnalysis (реальный путь анализа) с таймаутом.
+    const ct0 = Date.now()
+    const collectRes = await raceTimeout(
+      collectSessionsForAnalysis(TARGET, { limit: 50 }),
+      40000,
+    )
+    const collectMs = Date.now() - ct0
+    const collect = collectRes.done
+      ? { ok: true, timedOut: false, ms: collectMs, sessionsCollected: collectRes.value.length }
+      : { ok: false, timedOut: true, ms: collectMs, note: "collectSessionsForAnalysis завис >40с — ВОСПРОИЗВЕДЁН" }
+
     return NextResponse.json({
-      keysAvailable: keys.length,
-      listKeys: { ok: true, ms: listMs },
-      requestHandler: "requestTimeout=10s, connectionTimeout=3s, maxSockets=64 (throwOnRequestTimeout НЕ задан → только WARN)",
-      ladder,
+      prefixesFound: prefixes.length,
+      parallelListKeys: listLadder,
+      directCollect: collect,
     })
   } catch (e) {
     return NextResponse.json(

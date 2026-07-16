@@ -109,8 +109,13 @@ export async function getDashboardData(userId: string) {
 
   const totalActive = counts.CRITICAL + counts.IMPORTANT + counts.GOOD
 
+  // archivedAt: null — на дашборде (и демо) показываем только АКТИВНЫЕ
+  // цели. Архивные (напр. дубли «Главная» или цели с чужим URL) иначе
+  // мешаются в общем списке без пометки. Полный список с секцией
+  // «Архивированные» — на /dashboard/targets. Консистентно с
+  // targets-data (activeTargets/archivedTargets split, фикс 2026-07-15).
   const targets = await prisma.analysisTarget.findMany({
-    where: { siteId: site.id },
+    where: { siteId: site.id, archivedAt: null },
     orderBy: [{ status: "asc" }, { sessionsCollected: "desc" }],
   })
 

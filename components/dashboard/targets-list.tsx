@@ -3,7 +3,6 @@ import type { AnalysisTarget } from "@prisma/client"
 import type { LucideIcon } from "lucide-react"
 import { Archive, CheckCircle2, Loader2, PlayCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -26,8 +25,6 @@ const STATUS_BADGES: Record<
   COMPLETED: { label: "Проанализировано", variant: "default", icon: CheckCircle2 },
   ARCHIVED: { label: "В архиве", variant: "outline", icon: Archive },
 }
-
-const MIN_SESSIONS_FOR_ANALYSIS = 100
 
 interface TargetsListProps {
   targets: AnalysisTarget[]
@@ -66,18 +63,18 @@ export function TargetsList({ targets }: TargetsListProps) {
           </Link>
         </div>
         <CardDescription>
-          AI анализирует выбранные вами страницы. Минимум для запуска
-          анализа — {MIN_SESSIONS_FOR_ANALYSIS} сессий.
+          AI анализирует поведение посетителей на выбранных страницах. Ниже —
+          прогресс сбора сессий по каждой цели. Запуск анализа и управление —
+          в разделе «Управление целями».
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {targets.map((target) => {
           const status = STATUS_BADGES[target.status] ?? STATUS_BADGES.ACTIVE
           const percent =
-            (target.sessionsCollected / target.sessionsBudget) * 100
-          const canRunAnalysis =
-            target.status === "ACTIVE" &&
-            target.sessionsCollected >= MIN_SESSIONS_FOR_ANALYSIS
+            target.sessionsBudget > 0
+              ? (target.sessionsCollected / target.sessionsBudget) * 100
+              : 0
           const StatusIcon = status.icon
 
           return (
@@ -111,23 +108,6 @@ export function TargetsList({ targets }: TargetsListProps) {
                   {target.sessionsBudget.toLocaleString("ru-RU")}
                 </span>
               </div>
-
-              {target.status === "ACTIVE" && (
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-xs text-muted-foreground">
-                    {canRunAnalysis
-                      ? "Достаточно сессий — можно запускать"
-                      : `Нужно ещё ${MIN_SESSIONS_FOR_ANALYSIS - target.sessionsCollected} сессий до запуска`}
-                  </span>
-                  <Button
-                    size="sm"
-                    disabled={!canRunAnalysis}
-                    variant={canRunAnalysis ? "default" : "outline"}
-                  >
-                    Запустить анализ
-                  </Button>
-                </div>
-              )}
             </div>
           )
         })}

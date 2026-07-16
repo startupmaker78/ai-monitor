@@ -52,7 +52,13 @@ function createS3Client(): S3Client {
     // локально (сети нет); list/delete — мелкие. keepAlive — переиспольз.
     requestHandler: new NodeHttpHandler({
       connectionTimeout: 3000,
+      // throwOnRequestTimeout: без него requestTimeout ТОЛЬКО логирует WARN,
+      // а запрос на протухшем keep-alive сокете (YOS/egress молча роняет
+      // idle-соединение, singleton-клиент переиспользует «мёртвый») висит
+      // дальше → деадлок сбора на 300с/60с (инцидент 2026-07-15). С флагом:
+      // обрыв за 10с → SDK ретраит на СВЕЖЕМ сокете → self-heal.
       requestTimeout: 10000,
+      throwOnRequestTimeout: true,
       httpsAgent: new Agent({ keepAlive: true, maxSockets: 64 }),
     }),
   })

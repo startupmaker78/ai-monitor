@@ -114,6 +114,9 @@ export function SessionPlayer({ sessionId }: Props) {
   useEffect(() => {
     if (state.kind !== "ready") return
     if (state.events.length === 0) return
+    // Без FullSnapshot (type 2) rrweb не соберёт стартовый DOM и бросит
+    // при инициализации — не пытаемся, ниже показываем graceful-состояние.
+    if (!state.events.some((e) => e.type === 2)) return
     const target = containerRef.current
     if (!target) return
 
@@ -186,7 +189,24 @@ export function SessionPlayer({ sessionId }: Props) {
         </Notice>
       )
     }
-    return <Notice>В сессии нет записанных событий.</Notice>
+    return (
+      <Notice>
+        Посетитель ушёл слишком быстро — запись не велась (bounce).
+        Метаданные сессии показаны выше.
+      </Notice>
+    )
+  }
+
+  // events есть, но нет FullSnapshot (type 2) — rrweb не восстановит
+  // стартовый DOM (обрезанная/битая запись). Не рендерим плеер в пустой
+  // div (иначе тихий белый экран), показываем осмысленное состояние.
+  if (!state.events.some((e) => e.type === 2)) {
+    return (
+      <Notice tone="amber">
+        Запись неполна — стартовый снимок страницы не сохранился,
+        воспроизведение недоступно. Метаданные сессии показаны выше.
+      </Notice>
+    )
   }
 
   return (

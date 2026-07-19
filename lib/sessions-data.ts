@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma"
+import { prisma, withDbRetry } from "@/lib/prisma"
 
 export type SessionsForUser = {
   sites: Array<{ id: string; domain: string; isDemo: boolean }>
@@ -19,15 +19,21 @@ export async function getSessionsForUser(
   userId: string,
   options: { siteId?: string; sort?: "newest" | "oldest" } = {},
 ): Promise<SessionsForUser> {
-  const ownerProfile = await prisma.ownerProfile.findUnique({
-    where: { userId },
-    include: {
-      sites: {
-        orderBy: { createdAt: "asc" },
-        select: { id: true, domain: true, isDemo: true },
+  // withDbRetry: SSR-страницы дашборда на scale-to-zero контейнере ловят
+  // idle-обрыв TCP к Managed PG на первом запросе после простоя. Без
+  // ретрая transient-throw роняет весь SSR → 502 (единообразно с
+  // collect/should-record/finalize).
+  const ownerProfile = await withDbRetry(() =>
+    prisma.ownerProfile.findUnique({
+      where: { userId },
+      include: {
+        sites: {
+          orderBy: { createdAt: "asc" },
+          select: { id: true, domain: true, isDemo: true },
+        },
       },
-    },
-  })
+    }),
+  )
 
   if (!ownerProfile || ownerProfile.sites.length === 0) {
     return { sites: [], sessions: [], selectedSiteId: null }
@@ -41,15 +47,17 @@ export async function getSessionsForUser(
   const validatedSiteId =
     options.siteId && siteIds.includes(options.siteId) ? options.siteId : null
 
-  const sessions = await prisma.session.findMany({
-    where: { siteId: validatedSiteId ?? { in: siteIds } },
-    orderBy: { startedAt: options.sort === "oldest" ? "asc" : "desc" },
-    take: 50,
-    include: {
-      site: { select: { id: true, domain: true, isDemo: true } },
-      analysisTarget: { select: { id: true, url: true, name: true } },
-    },
-  })
+  const sessions = await withDbRetry(() =>
+    prisma.session.findMany({
+      where: { siteId: validatedSiteId ?? { in: siteIds } },
+      orderBy: { startedAt: options.sort === "oldest" ? "asc" : "desc" },
+      take: 50,
+      include: {
+        site: { select: { id: true, domain: true, isDemo: true } },
+        analysisTarget: { select: { id: true, url: true, name: true } },
+      },
+    }),
+  )
 
   return { sites, sessions, selectedSiteId: validatedSiteId }
 }
@@ -75,19 +83,23 @@ export async function loadOwnedSession(
   sessionId: string,
   userId: string,
 ): Promise<OwnedSession | null> {
-  const op = await prisma.ownerProfile.findUnique({
-    where: { userId },
-    select: { id: true },
-  })
+  const op = await withDbRetry(() =>
+    prisma.ownerProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    }),
+  )
   if (!op) return null
 
-  const found = await prisma.session.findUnique({
-    where: { id: sessionId },
-    include: {
-      site: { select: { ownerId: true, domain: true, isDemo: true } },
-      analysisTarget: { select: { id: true, url: true, name: true } },
-    },
-  })
+  const found = await withDbRetry(() =>
+    prisma.session.findUnique({
+      where: { id: sessionId },
+      include: {
+        site: { select: { ownerId: true, domain: true, isDemo: true } },
+        analysisTarget: { select: { id: true, url: true, name: true } },
+      },
+    }),
+  )
   if (!found || found.site.ownerId !== op.id) return null
 
   return {

@@ -367,6 +367,7 @@ function TargetCard({
               />
               <ArchiveControl
                 target={target}
+                analyzing={analyzing}
                 confirmMode={confirmMode}
                 setConfirmMode={setConfirmMode}
                 archiveAction={archiveAction}
@@ -375,10 +376,10 @@ function TargetCard({
           )}
         </div>
         {!archived && analyzing && (
-          <p className="mt-3 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-            Анализируем поведение посетителей… (~1 минута, не закрывайте
-            вкладку).
+          // Спиннер и «~1 минута» уже на кнопке — тут только уникальное
+          // предупреждение (на кнопке места нет), без дубля и второго спиннера.
+          <p className="mt-2 text-xs text-muted-foreground">
+            Не закрывайте вкладку до завершения.
           </p>
         )}
         {notice?.kind === "timeout" && (
@@ -498,11 +499,13 @@ function AnalyzeButton({
 
 function ArchiveControl({
   target,
+  analyzing,
   confirmMode,
   setConfirmMode,
   archiveAction,
 }: {
   target: TargetWithStats
+  analyzing: boolean
   confirmMode: boolean
   setConfirmMode: (v: boolean) => void
   archiveAction: (formData: FormData) => void
@@ -517,8 +520,14 @@ function ArchiveControl({
     ((target.status === "ACTIVE" || target.status === "READY") &&
       target.sessionsCollected === 0)
 
-  const archiveBlockedReason =
-    target.status === "ANALYZING"
+  // Во время клиентского запуска (analyzing) причину НЕ показываем: пропа
+  // target ещё старая (статус не ANALYZING) → «Сначала запустите анализ»
+  // противоречило бы идущему анализу. Экран и так занят спиннером кнопки +
+  // «не закрывайте вкладку». В idle причина осмысленна (объясняет disabled-
+  // архив): ANALYZING → «Анализ идёт»; collected>0 → «Сначала запустите».
+  const archiveBlockedReason = analyzing
+    ? null
+    : target.status === "ANALYZING"
       ? "Анализ идёт"
       : target.sessionsCollected > 0
         ? "Сначала запустите анализ"

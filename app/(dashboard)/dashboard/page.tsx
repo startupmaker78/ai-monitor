@@ -9,6 +9,7 @@ import { VisitsChart } from "@/components/dashboard/visits-chart"
 import { TierBadge } from "@/components/dashboard/tier-badge"
 import { UsageWidget } from "@/components/dashboard/usage-widget"
 import { TargetsList } from "@/components/dashboard/targets-list"
+import { EngagementBlock } from "@/components/dashboard/engagement-block"
 import { SyncButton } from "@/components/dashboard/sync-button"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -156,6 +157,8 @@ export default async function DashboardPage() {
       <VisitsChart data={data.chart} />
 
       <TargetsList targets={data.targets} />
+
+      <EngagementBlock engagement={data.engagement} />
     </div>
   )
 }

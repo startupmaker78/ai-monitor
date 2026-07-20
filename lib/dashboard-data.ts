@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma"
 import { DEMO_TIER, calculateDemoUsage } from "@/lib/demo-tier-info"
+import {
+  classifySession,
+  type SessionClass,
+} from "@/lib/session-classification"
 
 export async function getDashboardData(userId: string) {
   const ownerProfile = await prisma.ownerProfile.findUnique({
@@ -119,6 +123,72 @@ export async function getDashboardData(userId: string) {
     orderBy: [{ status: "asc" }, { sessionsCollected: "desc" }],
   })
 
+  // ── Вовлечённость страниц (Фаза 2). Классифицируем сессии активных
+  // целей ПО ДЕНОРМАЛИЗОВАННЫМ ПОЛЯМ (interactionCount/hasFullSnapshot/
+  // eventsCount, Фаза 1) — БЕЗ чтения S3. Через общий classifySession,
+  // чтобы определение совпадало с collect/бэкфиллом. Вовлечённость% =
+  // useful/(useful+passive+bounce) = доля РЕАЛЬНЫХ визитов (incomplete —
+  // боты/мгновенный уход — исключены, показаны сноской в UI).
+  // NB: тянем строки и считаем в JS (не raw-CASE), чтобы НЕ дублировать
+  // определение classifySession в SQL. Для MVP-объёмов дёшево; на крупных
+  // сайтах можно вынести в агрегат позже.
+  const activeTargetIds = targets.map((t) => t.id)
+  const engagementSessions =
+    activeTargetIds.length > 0
+      ? await prisma.session.findMany({
+          where: {
+            siteId: site.id,
+            analysisTargetId: { in: activeTargetIds },
+          },
+          select: {
+            analysisTargetId: true,
+            interactionCount: true,
+            hasFullSnapshot: true,
+            eventsCount: true,
+          },
+        })
+      : []
+
+  const tallyByTarget = new Map<string, Record<SessionClass, number>>()
+  for (const t of targets) {
+    tallyByTarget.set(t.id, { useful: 0, passive: 0, bounce: 0, incomplete: 0 })
+  }
+  for (const s of engagementSessions) {
+    if (!s.analysisTargetId) continue
+    const tally = tallyByTarget.get(s.analysisTargetId)
+    if (!tally) continue
+    const cls = classifySession({
+      interactionCount: s.interactionCount,
+      hasFullSnapshot: s.hasFullSnapshot,
+      eventsCount: s.eventsCount,
+    })
+    tally[cls]++
+  }
+
+  const engagement = targets.map((t) => {
+    const c = tallyByTarget.get(t.id) ?? {
+      useful: 0,
+      passive: 0,
+      bounce: 0,
+      incomplete: 0,
+    }
+    const realVisits = c.useful + c.passive + c.bounce
+    return {
+      targetId: t.id,
+      name: t.name,
+      url: t.url,
+      useful: c.useful,
+      passive: c.passive,
+      bounce: c.bounce,
+      incomplete: c.incomplete,
+      total: realVisits + c.incomplete,
+      realVisits,
+      // null = нет реальных визитов → «нет данных» в UI, а не «0%».
+      engagementPct:
+        realVisits > 0 ? Math.round((c.useful / realVisits) * 100) : null,
+    }
+  })
+
   const monthStart = new Date()
   monthStart.setUTCDate(1)
   monthStart.setUTCHours(0, 0, 0, 0)
@@ -152,6 +222,7 @@ export async function getDashboardData(userId: string) {
     recommendations: topRecommendations.slice(0, 10),
     priorityCounts: counts,
     targets,
+    engagement,
     tier: {
       name: DEMO_TIER.name,
       price: DEMO_TIER.pricePerMonth,

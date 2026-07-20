@@ -216,6 +216,13 @@ export function SessionPlayer({ sessionId }: Props) {
 
   return (
     <div className="space-y-3">
+      {/* Полноширинная подсказка МЕЖДУ метаданными сессии (в page.tsx,
+          выше) и плеером. Раньше стояла после плеера и рендерилась сбоку
+          от видео (rrweb-player-host сжимается по контенту). */}
+      <p className="text-xs text-muted-foreground">
+        Внешние ресурсы сайта (стили, шрифты, изображения) могут
+        отображаться неточно — это не влияет на анализ поведения посетителя.
+      </p>
       {state.active && (
         <Notice tone="amber">
           Сессия ещё активна. Обновите страницу через несколько минут
@@ -223,10 +230,6 @@ export function SessionPlayer({ sessionId }: Props) {
         </Notice>
       )}
       <div ref={containerRef} className="rrweb-player-host" />
-      <p className="text-xs text-muted-foreground">
-        Внешние ресурсы сайта (стили, шрифты, изображения) могут
-        отображаться неточно — это не влияет на анализ поведения посетителя.
-      </p>
     </div>
   )
 }

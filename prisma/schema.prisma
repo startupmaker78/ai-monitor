@@ -164,6 +164,14 @@ model Session {
   // для них cron fallback на now.
   lastPacketAt     DateTime?
   eventsCount      Int             @default(0)
+  // Денормализация для метрики вовлечённости цели (lib/session-classification.ts).
+  // Заполняются в collect по мере пакетов (increment/OR, receipt-гейт как
+  // eventsCount) + бэкфилл существующих. interactionCount = число ДЕЙСТВИЙ
+  // (клик/скролл/ввод, без mousemove/mutation). hasFullSnapshot = была ли
+  // type-2. Класс: interactionCount>0→useful; !hasFullSnapshot→incomplete;
+  // eventsCount>5→passive; иначе bounce. Дефолты для legacy → бэкфилл.
+  interactionCount Int             @default(0)
+  hasFullSnapshot  Boolean         @default(false)
   storageKey       String?
   analysisTargetId String?
   analysisTarget   AnalysisTarget? @relation(fields: [analysisTargetId], references: [id], onDelete: SetNull)

@@ -18,6 +18,7 @@
     "seed:test-site": "dotenv -e .env.local -- tsx scripts/seed-test-site.ts",
     "cleanup:demo-data": "dotenv -e .env.local -- tsx scripts/cleanup-demo-data.ts",
     "fix:nolim-domain": "dotenv -e .env.local -- tsx scripts/fix-nolim-domain.ts",
+    "backfill:session-classification": "dotenv -e .env.local -- tsx scripts/backfill-session-classification.ts",
     "prisma": "dotenv -e .env.local -- prisma"
   },
   "dependencies": {

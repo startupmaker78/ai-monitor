@@ -4,6 +4,10 @@ import { trackingPacketSchema } from "@/lib/tracking-schema"
 import { prisma, withDbRetry, isTransientDbError } from "@/lib/prisma"
 import { putJson } from "@/lib/storage"
 import { hashIp, extractClientIp } from "@/lib/ip-hash"
+import {
+  countInteractions,
+  hasFullSnapshot,
+} from "@/lib/session-classification"
 
 // zlib.gunzipSync требует Node runtime (в Edge его нет). Route и так
 // node-only (Prisma pg-adapter + aws-sdk), но раньше явного export'а не
@@ -306,6 +310,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             // для всех пакетов (в т.ч. первого) — здесь 0, чтобы первый
             // пакет не задвоился (create + receipt-increment).
             eventsCount: 0,
+            // interactionCount/hasFullSnapshot — как eventsCount: базовые
+            // 0/false здесь, реальные значения через receipt-гейт ниже
+            // (иначе первый пакет задвоился бы: create + increment).
+            interactionCount: 0,
+            hasFullSnapshot: false,
             storageKey: prefix,
             analysisTargetId: validatedTargetId,
           },
@@ -333,6 +342,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // subsequent-финала (на первом пакете endedAt уже в createMany).
       const sessionUpdate: {
         eventsCount?: { increment: number }
+        interactionCount?: { increment: number }
+        hasFullSnapshot?: boolean
         endedAt?: Date
         lastPacketAt?: Date
       } = {}
@@ -343,12 +354,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // Сворачиваем в тот же update, что и eventsCount — лишних
         // writes нет.
         sessionUpdate.lastPacketAt = nowDate
+        // Денормализация вовлечённости (lib/session-classification.ts):
+        // interactionCount инкрементим по пакетам (как eventsCount);
+        // hasFullSnapshot — OR только ВВЕРХ (ставим true когда пакет несёт
+        // type-2; никогда не сбрасываем). Оба в том же receipt-гейте →
+        // идемпотентно, без двойного счёта и без лишних writes.
+        const interactions = countInteractions(packet.events)
+        if (interactions > 0) {
+          sessionUpdate.interactionCount = { increment: interactions }
+        }
+        if (hasFullSnapshot(packet.events)) {
+          sessionUpdate.hasFullSnapshot = true
+        }
       }
       if (!isFirstPacket && packet.isFinal) {
         sessionUpdate.endedAt = nowDate
       }
       if (
         sessionUpdate.eventsCount ||
+        sessionUpdate.interactionCount ||
+        sessionUpdate.hasFullSnapshot ||
         sessionUpdate.endedAt ||
         sessionUpdate.lastPacketAt
       ) {

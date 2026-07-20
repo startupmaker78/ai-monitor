@@ -55,14 +55,27 @@ export async function loadTargetsWithRecommendations(
   return sorted.map((s) => s.target)
 }
 
-export type LoadedRecommendations = {
-  target: { id: string; name: string | null; url: string }
-  analysis: { id: string; createdAt: Date } | null
+export type AnalysisWithRecs = {
+  id: string
+  createdAt: Date
+  sessionsAnalyzed: number
+  recommendationsCount: number
   recommendations: Recommendation[]
 }
 
-// Загружает рекомендации ПОСЛЕДНЕГО DONE-анализа этой цели. null если
-// target не найден или не принадлежит юзеру (caller → notFound).
+export type LoadedRecommendations = {
+  target: { id: string; name: string | null; url: string }
+  // ВСЕ DONE-анализы цели, новейший первым. Каждый со своими
+  // рекомендациями — история доступна в UI (селектор анализа) без доп.
+  // запросов. Дёшево: rec на анализ единицы (6-8), анализов на цель — тоже
+  // единицы (растёт при Модели B, но остаётся мало). Пустой массив если
+  // DONE-анализов нет.
+  analyses: AnalysisWithRecs[]
+}
+
+// Загружает target + ВСЕ его DONE-анализы с рекомендациями (новейший
+// первым). null если target не найден или не принадлежит юзеру
+// (caller → notFound / empty state).
 export async function loadRecommendationsForTarget(
   userId: string,
   targetId: string,
@@ -79,22 +92,20 @@ export async function loadRecommendationsForTarget(
   })
   if (!target || target.site.ownerId !== op.id) return null
 
-  const latestAnalysis = await prisma.analysis.findFirst({
+  const analyses = await prisma.analysis.findMany({
     where: { targetId, status: "DONE" },
     orderBy: { createdAt: "desc" },
-    select: { id: true, createdAt: true },
+    select: {
+      id: true,
+      createdAt: true,
+      sessionsAnalyzed: true,
+      recommendationsCount: true,
+      recommendations: { orderBy: { sortOrder: "asc" } },
+    },
   })
-
-  const recommendations = latestAnalysis
-    ? await prisma.recommendation.findMany({
-        where: { analysisId: latestAnalysis.id },
-        orderBy: { sortOrder: "asc" },
-      })
-    : []
 
   return {
     target: { id: target.id, name: target.name, url: target.url },
-    analysis: latestAnalysis,
-    recommendations,
+    analyses,
   }
 }

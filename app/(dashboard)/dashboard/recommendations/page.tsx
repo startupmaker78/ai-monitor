@@ -1,39 +1,14 @@
 import { redirect } from "next/navigation"
-import type { Recommendation } from "@prisma/client"
 import { auth } from "@/auth"
 import {
   loadRecommendationsForTarget,
   loadTargetsWithRecommendations,
 } from "@/lib/recommendations-data"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { LocalDateTime } from "@/components/ui/local-date-time"
+import { Card, CardContent } from "@/components/ui/card"
 import { TargetSelector } from "./target-selector"
+import { RecommendationsClient } from "./recommendations-client"
 
 export const metadata = { title: "Рекомендации — Вебмонитор" }
-
-const PRIORITY_META: Record<
-  string,
-  { label: string; variant: "destructive" | "default" | "secondary" }
-> = {
-  CRITICAL: { label: "Критично", variant: "destructive" },
-  IMPORTANT: { label: "Важно", variant: "default" },
-  GOOD: { label: "Хорошо", variant: "secondary" },
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  USABILITY: "Юзабилити",
-  CONTENT: "Контент",
-  MOBILE: "Мобильная версия",
-  PERFORMANCE: "Скорость",
-  TRUST: "Доверие",
-}
-
-const EFFORT_LABELS: Record<string, string> = {
-  LOW: "малые",
-  MEDIUM: "средние",
-  HIGH: "высокие",
-}
 
 type PageProps = { searchParams: { targetId?: string } }
 
@@ -100,85 +75,12 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
           <span className="font-medium text-foreground">
             {data.target.name ?? data.target.url}
           </span>
-          {data.analysis && (
-            <>
-              {" · "}Анализ от <LocalDateTime value={data.analysis.createdAt} />
-            </>
-          )}
         </p>
       </div>
 
-      {data.recommendations.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">
-              По этой цели пока нет рекомендаций.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {data.recommendations.map((rec) => (
-            <RecommendationDetailCard key={rec.id} rec={rec} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function RecommendationDetailCard({ rec }: { rec: Recommendation }) {
-  const priority = PRIORITY_META[rec.priority] ?? {
-    label: rec.priority,
-    variant: "secondary" as const,
-  }
-  const categoryLabel = CATEGORY_LABELS[rec.category] ?? rec.category
-  const effortLabel = EFFORT_LABELS[rec.effort] ?? rec.effort
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <CardTitle className="text-lg leading-tight">{rec.title}</CardTitle>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Badge variant={priority.variant}>{priority.label}</Badge>
-            <Badge variant="outline">{categoryLabel}</Badge>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <Section label="Проблема" value={rec.problem} />
-        <Section label="Что сделать" value={rec.description} />
-        <Section label="Ожидаемый эффект" value={rec.expectedImpact} />
-        <div className="flex flex-wrap items-center gap-3 pt-2 text-xs text-muted-foreground">
-          <span>
-            Усилия:{" "}
-            <span className="font-medium text-foreground">{effortLabel}</span>
-          </span>
-          {rec.metric && (
-            <span>
-              Метрика:{" "}
-              <span className="font-medium text-foreground">{rec.metric}</span>
-            </span>
-          )}
-          {rec.lowConfidence && (
-            <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">
-              низкая уверенность
-            </span>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function Section({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="leading-relaxed">{value}</p>
+      {/* key={target.id}: смена цели = ремоунт → selectedAnalysisIndex
+          сбрасывается в 0 (последний анализ новой цели). */}
+      <RecommendationsClient key={data.target.id} analyses={data.analyses} />
     </div>
   )
 }

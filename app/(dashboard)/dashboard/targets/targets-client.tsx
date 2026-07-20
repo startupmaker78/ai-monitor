@@ -4,7 +4,7 @@ import { useFormState, useFormStatus } from "react-dom"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Loader2 } from "lucide-react"
+import { CheckCircle2, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,6 +15,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   createTarget,
   archiveTarget,
@@ -373,20 +381,6 @@ function TargetCard({
             вкладку).
           </p>
         )}
-        {notice?.kind === "success" && (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-green-200 bg-green-50 p-2 text-sm text-green-800">
-            <span>
-              Анализ завершён · {notice.recommendationsCount}{" "}
-              {pluralRec(notice.recommendationsCount)}.
-            </span>
-            <Link
-              href={`/dashboard/recommendations?targetId=${target.id}`}
-              className="font-medium underline underline-offset-2 hover:no-underline"
-            >
-              Перейти к рекомендациям →
-            </Link>
-          </div>
-        )}
         {notice?.kind === "timeout" && (
           <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
             Анализ идёт дольше обычного. Проверьте{" "}
@@ -417,6 +411,41 @@ function TargetCard({
           <p className="mt-2 text-sm text-destructive">{archiveState.error}</p>
         )}
       </CardContent>
+
+      {/* Success — центральный модал (важное событие: акцент + переход к
+          результату). Ошибки/timeout/loading остаются инлайн (заход 1). */}
+      <Dialog
+        open={notice?.kind === "success"}
+        onOpenChange={(open) => !open && setNotice(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              Анализ завершён
+            </DialogTitle>
+            <DialogDescription>
+              {notice?.kind === "success" && (
+                <>
+                  Найдено {notice.recommendationsCount}{" "}
+                  {pluralRec(notice.recommendationsCount)} по цели «
+                  {target.name ?? target.url}».
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNotice(null)}>
+              Закрыть
+            </Button>
+            <Link href={`/dashboard/recommendations?targetId=${target.id}`}>
+              <Button className="w-full sm:w-auto">
+                Перейти к рекомендациям
+              </Button>
+            </Link>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

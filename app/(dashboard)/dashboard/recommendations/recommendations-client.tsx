@@ -5,6 +5,12 @@ import type { Recommendation } from "@prisma/client"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { LocalDateTime } from "@/components/ui/local-date-time"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type { AnalysisWithRecs } from "@/lib/recommendations-data"
 
 const PRIORITY_META: Record<
@@ -68,12 +74,23 @@ export function RecommendationsClient({ analyses }: Props) {
             <LocalDateTime value={selected.createdAt} />
           </span>
           {" · "}проанализировано{" "}
-          <span
-            className="cursor-help underline decoration-dotted underline-offset-2"
-            title="Анализируются только сессии с действиями посетителя (клики, скролл, формы). Пустые — bounce и пассивные просмотры — пропускаются, поэтому число меньше, чем «собрано» у цели."
-          >
-            {selected.sessionsAnalyzed} сессий с действиями
-          </span>
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  tabIndex={0}
+                  className="cursor-help underline decoration-dotted underline-offset-2 outline-none"
+                >
+                  {selected.sessionsAnalyzed} сессий с действиями
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs text-xs font-normal leading-relaxed">
+                Анализируются только сессии с действиями посетителя (клики,
+                скролл, формы). Пустые — bounce и пассивные просмотры —
+                пропускаются, поэтому число меньше, чем «собрано» у цели.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {" · "}
           {selected.recommendationsCount} рек
         </p>

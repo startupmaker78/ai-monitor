@@ -3,6 +3,8 @@
 import { useFormState, useFormStatus } from "react-dom"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -213,6 +215,38 @@ const STATUS_LABELS: Record<string, string> = {
   ARCHIVED: "Архив",
 }
 
+// Клиентский таймаут запроса анализа. Норма ~55с; берём 150с — покрывает
+// разброс, но ниже Gateway 300с (быстрее его 504). При аборте НЕ говорим
+// «провал»: сервер мог довести анализ (свои гарды), результат появится в
+// /recommendations — сообщение «идёт дольше, проверьте позже».
+const ANALYZE_TIMEOUT_MS = 150_000
+
+// Ретраибельные (временные) ошибки — показываем «Повторить». Остальные
+// (no_interactions, not_enough_sessions, monthly_limit, provider_denied)
+// не ретраить — нужны действия/время.
+const RETRIABLE_ERRORS = new Set([
+  "relay_unavailable",
+  "claude_retriable",
+  "claude_invalid",
+  "collect_timeout",
+  "race_condition",
+  "internal",
+])
+
+function pluralRec(n: number): string {
+  const d = n % 10
+  const dd = n % 100
+  if (d === 1 && dd !== 11) return "рекомендация"
+  if (d >= 2 && d <= 4 && (dd < 10 || dd >= 20)) return "рекомендации"
+  return "рекомендаций"
+}
+
+// Инлайн-итог запуска (ЗАХОД 1, без модалки). null = ничего не показано.
+type AnalyzeNotice =
+  | { kind: "success"; recommendationsCount: number }
+  | { kind: "timeout" }
+  | { kind: "error"; message: string; retriable: boolean }
+
 function TargetCard({
   target,
   archived = false,
@@ -228,7 +262,7 @@ function TargetCard({
   )
   const [confirmMode, setConfirmMode] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
-  const [analyzeError, setAnalyzeError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<AnalyzeNotice | null>(null)
   const router = useRouter()
 
   const progress =
@@ -241,33 +275,58 @@ function TargetCard({
 
   async function handleAnalyze() {
     setAnalyzing(true)
-    setAnalyzeError(null)
+    setNotice(null)
+    // Таймаут: не вечный спиннер. abort() → catch AbortError → «идёт дольше».
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS)
     try {
       const res = await fetch("/api/analysis/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetId: target.id }),
+        // Same-origin → куки и так шлются (default), указываем явно.
+        credentials: "same-origin",
+        signal: controller.signal,
       })
+      clearTimeout(timeoutId)
       const data = (await res.json().catch(() => ({}))) as {
         message?: string
         error?: string
+        recommendationsCount?: number
       }
+      setAnalyzing(false)
       if (!res.ok) {
-        setAnalyzeError(
-          data.message ?? `Ошибка сервера (${res.status}). Попробуйте ещё раз.`,
-        )
-        setAnalyzing(false)
+        setNotice({
+          kind: "error",
+          message:
+            data.message ??
+            `Ошибка сервера (${res.status}). Попробуйте ещё раз.`,
+          retriable: data.error
+            ? RETRIABLE_ERRORS.has(data.error)
+            : res.status >= 500,
+        })
         return
       }
-      // Успех: рефрешим страницу — server component перечитает данные,
-      // карточка перерисуется со статусом COMPLETED.
-      router.refresh()
-      setAnalyzing(false)
+      // Успех: показываем итог + обновляем карточку (Модель B: цель
+      // вернулась в сбор). await refresh — прогресс/статус перечитаются;
+      // клиентский `notice` при этом сохраняется (тот же инстанс).
+      setNotice({
+        kind: "success",
+        recommendationsCount: data.recommendationsCount ?? 0,
+      })
+      await router.refresh()
     } catch (err) {
-      setAnalyzeError(
-        err instanceof Error ? err.message : "Ошибка сети.",
-      )
+      clearTimeout(timeoutId)
       setAnalyzing(false)
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setNotice({ kind: "timeout" })
+      } else {
+        setNotice({
+          kind: "error",
+          message: "Ошибка сети. Проверьте соединение и повторите.",
+          retriable: true,
+        })
+      }
     }
   }
 
@@ -308,12 +367,51 @@ function TargetCard({
           )}
         </div>
         {!archived && analyzing && (
-          <p className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
-            Идёт анализ, обычно ~1 минута. Не закрывайте вкладку.
+          <p className="mt-3 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            Анализируем поведение посетителей… (~1 минута, не закрывайте
+            вкладку).
           </p>
         )}
-        {analyzeError && (
-          <p className="mt-2 text-sm text-destructive">{analyzeError}</p>
+        {notice?.kind === "success" && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-green-200 bg-green-50 p-2 text-sm text-green-800">
+            <span>
+              Анализ завершён · {notice.recommendationsCount}{" "}
+              {pluralRec(notice.recommendationsCount)}.
+            </span>
+            <Link
+              href={`/dashboard/recommendations?targetId=${target.id}`}
+              className="font-medium underline underline-offset-2 hover:no-underline"
+            >
+              Перейти к рекомендациям →
+            </Link>
+          </div>
+        )}
+        {notice?.kind === "timeout" && (
+          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
+            Анализ идёт дольше обычного. Проверьте{" "}
+            <Link
+              href={`/dashboard/recommendations?targetId=${target.id}`}
+              className="font-medium underline underline-offset-2 hover:no-underline"
+            >
+              «Рекомендации»
+            </Link>{" "}
+            через минуту или запустите снова.
+          </p>
+        )}
+        {notice?.kind === "error" && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm text-destructive">
+            <span>{notice.message}</span>
+            {notice.retriable && (
+              <button
+                type="button"
+                onClick={handleAnalyze}
+                className="font-medium underline underline-offset-2 hover:no-underline"
+              >
+                Повторить
+              </button>
+            )}
+          </div>
         )}
         {archiveState?.ok === false && archiveState.error && (
           <p className="mt-2 text-sm text-destructive">{archiveState.error}</p>
@@ -357,7 +455,14 @@ function AnalyzeButton({
   }
   return (
     <Button type="button" size="sm" disabled={analyzing} onClick={onAnalyze}>
-      {analyzing ? "Идёт анализ ~1 минута…" : "Запустить анализ"}
+      {analyzing ? (
+        <>
+          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          Анализируем… (~1 минута)
+        </>
+      ) : (
+        "Запустить анализ"
+      )}
     </Button>
   )
 }

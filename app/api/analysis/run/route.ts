@@ -16,6 +16,7 @@ const ERROR_TO_HTTP: Record<RunAnalysisError, number> = {
   target_not_found: 404,
   not_enough_sessions: 409,
   no_sessions: 422,
+  no_interactions: 422,
   collect_timeout: 503,
   monthly_limit: 429,
   race_condition: 409,

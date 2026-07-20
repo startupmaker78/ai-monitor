@@ -4,11 +4,11 @@ import {
   buildAnalysisPrompt,
   parseRecommendations,
   type AnalysisInput,
-  type SessionSummary,
 } from "@/lib/analysis-prompt"
 import {
   collectSessionsForAnalysis,
   MAX_SESSIONS_PER_ANALYSIS,
+  type CollectSessionsResult,
 } from "@/lib/session-pre-processor"
 import { getEffectiveTier } from "@/lib/tier-limits"
 import { validateSiteOwnership } from "@/lib/site-data"
@@ -19,6 +19,7 @@ export type RunAnalysisError =
   | "target_not_found"
   | "not_enough_sessions"
   | "no_sessions"
+  | "no_interactions"
   | "collect_timeout"
   | "monthly_limit"
   | "race_condition"
@@ -178,9 +179,9 @@ export async function runAnalysis(
   // 60с < 300с Gateway → падаем чисто ДО 504, markFailed возвращает цель
   // в ACTIVE. Дополняет per-request S3-таймауты (lib/storage.ts): даже
   // если те не сработают — общий cap не даст зависнуть.
-  let sessionSummaries: SessionSummary[]
+  let collected: CollectSessionsResult
   try {
-    sessionSummaries = await withTimeout(
+    collected = await withTimeout(
       collectSessionsForAnalysis(targetId, {
         limit: MAX_SESSIONS_PER_ANALYSIS,
       }),
@@ -203,17 +204,32 @@ export async function runAnalysis(
     }
   }
 
-  // Фолбэк (боевой путь): если ни одной валидной сессии не собралось
-  // (все corrupted / no_full_snapshot / недоступны в S3) — анализировать
-  // нечего. Модель B: markFailed возвращает цель в сбор, юзер повторит.
+  const sessionSummaries = collected.summaries
+
+  // Фолбэк (боевой путь): если ни одной СОДЕРЖАТЕЛЬНОЙ сессии не осталось —
+  // анализировать нечего. Модель B: markFailed возвращает цель в сбор.
   // NB: сессий может быть <5 (часть отсеялась) — это НЕ ошибка, анализ
   // идёт на том что есть (гейт ≥5 отработал на уровне collected цели).
   if (sessionSummaries.length === 0) {
     console.error("[analysis-runner] no analyzable sessions", {
       analysisId: analysis.id,
       targetId,
+      skipped: collected.skipped,
     })
     await markFailed(analysis.id, targetId)
+    // Различаем причину пустоты: если сессии БЫЛИ, но все без действий
+    // (bounce/пассивные, отсеяны фильтром) — это не поломка данных, а
+    // отсутствие поведения. Отдельный отказ, чтобы юзер понял: данные
+    // целы, но анализировать нечего (нужен активный трафик).
+    if (collected.skipped.noInteractions > 0) {
+      return {
+        ok: false,
+        error: "no_interactions",
+        message:
+          "Собранные сессии не содержат действий посетителей (клики, скролл, формы) — анализировать нечего. Как накопятся активные сессии, запустите снова.",
+        analysisId: analysis.id,
+      }
+    }
     return {
       ok: false,
       error: "no_sessions",

@@ -316,10 +316,22 @@ export async function extractSessionSummary(
   return { ok: true, summary, incomplete }
 }
 
+export type CollectSessionsResult = {
+  summaries: SessionSummary[]
+  // Счётчики отсева — рунер по ним различает «0 содержательных, но сессии
+  // были пустыми» vs «0 из-за повреждённых/недоступных данных».
+  skipped: {
+    corrupted: number
+    noFullSnapshot: number
+    noPackets: number
+    noInteractions: number
+  }
+}
+
 export async function collectSessionsForAnalysis(
   targetId: string,
   options: { limit: number },
-): Promise<SessionSummary[]> {
+): Promise<CollectSessionsResult> {
   const cutoff = new Date(Date.now() - INCOMPLETE_GRACE_MS)
   const sessions = await prisma.session.findMany({
     where: {
@@ -338,7 +350,12 @@ export async function collectSessionsForAnalysis(
     orderBy: { startedAt: "desc" },
   })
 
-  if (sessions.length === 0) return []
+  if (sessions.length === 0) {
+    return {
+      summaries: [],
+      skipped: { corrupted: 0, noFullSnapshot: 0, noPackets: 0, noInteractions: 0 },
+    }
+  }
 
   // Стратификация по deviceType (по UA, без download S3).
   const sampled = stratifySample(sessions, options.limit)
@@ -361,11 +378,31 @@ export async function collectSessionsForAnalysis(
     corrupted_json: 0,
     no_full_snapshot: 0,
     no_packets: 0,
+    no_interactions: 0,
     incomplete: 0,
   }
   for (const r of results) {
     if (r.ok) {
-      summaries.push(r.summary)
+      // Фильтр пустых сессий: bounce (снапшот, 0 действий) и пассивные
+      // (только фоновые Tilda-мутации) дают summary с clicks:[],
+      // scrollDepth:0, formInteractions:[] — пустышка, которая тратит
+      // токены/внимание Claude, ничего не давая. Содержательна сессия,
+      // если есть хотя бы одно ДЕЙСТВИЕ: клик, скролл или взаимодействие
+      // с полем. (mousemove в summary не попадает — и это не действие.)
+      // rage/deadClicks производны от clicks — отдельно проверять не нужно.
+      // Данные сессии НЕ трогаем (budget/S3/БД) — только исключаем из
+      // выборки для промпта. B (Meta без FullSnapshot, пустой nodeById)
+      // тоже даёт 0 действий → отсеивается здесь же.
+      const s = r.summary
+      const meaningful =
+        s.clicks.length > 0 ||
+        s.scrollDepth > 0 ||
+        s.formInteractions.length > 0
+      if (!meaningful) {
+        counts.no_interactions++
+        continue
+      }
+      summaries.push(s)
       if (r.incomplete) counts.incomplete++
     } else {
       counts[r.reason]++
@@ -382,8 +419,17 @@ export async function collectSessionsForAnalysis(
     skipped_corrupted: counts.corrupted_json,
     skipped_no_full_snapshot: counts.no_full_snapshot,
     skipped_no_packets: counts.no_packets,
+    skipped_no_interactions: counts.no_interactions,
   })
-  return summaries.slice(0, options.limit)
+  return {
+    summaries: summaries.slice(0, options.limit),
+    skipped: {
+      corrupted: counts.corrupted_json,
+      noFullSnapshot: counts.no_full_snapshot,
+      noPackets: counts.no_packets,
+      noInteractions: counts.no_interactions,
+    },
+  }
 }
 
 // ─── node-id-map helpers (6.3b) ─────────────────────────────────────────

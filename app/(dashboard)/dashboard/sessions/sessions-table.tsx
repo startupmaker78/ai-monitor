@@ -1,23 +1,12 @@
 import Link from "next/link"
 import type { SessionsForUser } from "@/lib/sessions-data"
 import { LocalDateTime } from "@/components/ui/local-date-time"
+import { SessionStatus } from "@/components/ui/session-status"
 
 type Props = {
   sessions: SessionsForUser["sessions"]
   selectedSiteId: string | null
   currentSort: "newest" | "oldest"
-}
-
-function formatDuration(startedAt: Date, endedAt: Date | null): string {
-  if (!endedAt) return "активна"
-  const sec = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000))
-  if (sec < 60) return `${sec}с`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  if (sec < 3600) return `${m}м ${s}с`
-  const h = Math.floor(m / 60)
-  const mm = m % 60
-  return `${h}ч ${mm}м`
 }
 
 function truncate(s: string, n: number): string {
@@ -34,6 +23,11 @@ export function SessionsTable({ sessions, selectedSiteId, currentSort }: Props) 
   }
 
   const nextSort: "newest" | "oldest" = currentSort === "newest" ? "oldest" : "newest"
+
+  // Снимок серверного времени на момент рендера — передаём в SessionStatus
+  // для детерминированного первого рендера (SSR===гидратация). На клиенте
+  // компонент дальше считает по своему Date.now().
+  const serverNowMs = Date.now()
 
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
@@ -60,11 +54,12 @@ export function SessionsTable({ sessions, selectedSiteId, currentSort }: Props) 
                 <LocalDateTime value={s.startedAt} />
               </td>
               <td className="px-4 py-3 whitespace-nowrap">
-                {s.endedAt ? (
-                  formatDuration(s.startedAt, s.endedAt)
-                ) : (
-                  <span className="text-blue-600">активна</span>
-                )}
+                <SessionStatus
+                  startedAtMs={s.startedAt.getTime()}
+                  endedAtMs={s.endedAt ? s.endedAt.getTime() : null}
+                  lastPacketAtMs={s.lastPacketAt ? s.lastPacketAt.getTime() : null}
+                  serverNowMs={serverNowMs}
+                />
               </td>
               <td className="px-4 py-3">
                 <span>{s.site.domain}</span>

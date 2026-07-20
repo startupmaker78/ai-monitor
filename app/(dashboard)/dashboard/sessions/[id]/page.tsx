@@ -3,24 +3,10 @@ import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { loadOwnedSession } from "@/lib/sessions-data"
 import { LocalDateTime } from "@/components/ui/local-date-time"
+import { SessionStatus } from "@/components/ui/session-status"
 import { SessionPlayer } from "./session-player"
 
 export const metadata = { title: "Воспроизведение сессии — Вебмонитор" }
-
-function formatDuration(startedAt: Date, endedAt: Date | null): string {
-  if (!endedAt) return "активна"
-  const sec = Math.max(
-    0,
-    Math.round((endedAt.getTime() - startedAt.getTime()) / 1000),
-  )
-  if (sec < 60) return `${sec}с`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  if (sec < 3600) return `${m}м ${s}с`
-  const h = Math.floor(m / 60)
-  const mm = m % 60
-  return `${h}ч ${mm}м`
-}
 
 type PageProps = { params: { id: string } }
 
@@ -46,8 +32,13 @@ export default async function SessionPlayerPage({ params }: PageProps) {
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           <LocalDateTime value={owned.startedAt} /> ·{" "}
-          {formatDuration(owned.startedAt, owned.endedAt)} ·{" "}
-          {owned.eventsCount.toLocaleString("ru-RU")} событий ·{" "}
+          <SessionStatus
+            startedAtMs={owned.startedAt.getTime()}
+            endedAtMs={owned.endedAt ? owned.endedAt.getTime() : null}
+            lastPacketAtMs={owned.lastPacketAt ? owned.lastPacketAt.getTime() : null}
+            serverNowMs={Date.now()}
+          />{" "}
+          · {owned.eventsCount.toLocaleString("ru-RU")} событий ·{" "}
           сайт {owned.site.domain} ·{" "}
           посетитель …{owned.ipHash.slice(-8)}
           {owned.analysisTarget && (

@@ -7,6 +7,9 @@ export type SessionsForUser = {
     sessionToken: string
     startedAt: Date
     endedAt: Date | null
+    // Время последнего долетевшего пакета — для статуса «онлайн» (свежий)
+    // vs «не завершена» (пакеты стихли). null у legacy-сессий до миграции.
+    lastPacketAt: Date | null
     eventsCount: number
     ipHash: string
     site: { id: string; domain: string; isDemo: boolean }
@@ -69,6 +72,7 @@ export type OwnedSession = {
   storageKey: string | null
   startedAt: Date
   endedAt: Date | null
+  lastPacketAt: Date | null
   eventsCount: number
   ipHash: string
   site: { domain: string; isDemo: boolean }
@@ -109,6 +113,7 @@ export async function loadOwnedSession(
     storageKey: found.storageKey,
     startedAt: found.startedAt,
     endedAt: found.endedAt,
+    lastPacketAt: found.lastPacketAt,
     eventsCount: found.eventsCount,
     ipHash: found.ipHash,
     site: { domain: found.site.domain, isDemo: found.site.isDemo },

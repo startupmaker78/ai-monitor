@@ -67,7 +67,13 @@ export function RecommendationsClient({ analyses }: Props) {
           <span className="font-medium text-foreground">
             <LocalDateTime value={selected.createdAt} />
           </span>
-          {" · "}проанализировано {selected.sessionsAnalyzed} сессий
+          {" · "}проанализировано{" "}
+          <span
+            className="cursor-help underline decoration-dotted underline-offset-2"
+            title="Анализируются только сессии с действиями посетителя (клики, скролл, формы). Пустые — bounce и пассивные просмотры — пропускаются, поэтому число меньше, чем «собрано» у цели."
+          >
+            {selected.sessionsAnalyzed} сессий с действиями
+          </span>
           {" · "}
           {selected.recommendationsCount} рек
         </p>
@@ -135,7 +141,7 @@ function AnalysisSelector({
       ...(mounted ? {} : { timeZone: "UTC" }),
     })
     const suffix = index === 0 ? " (последний)" : ""
-    return `${date} · ${a.sessionsAnalyzed} сессий · ${a.recommendationsCount} рек${suffix}`
+    return `${date} · ${a.sessionsAnalyzed} с действиями · ${a.recommendationsCount} рек${suffix}`
   }
 
   return (

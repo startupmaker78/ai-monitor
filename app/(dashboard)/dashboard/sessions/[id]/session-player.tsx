@@ -139,6 +139,11 @@ export function SessionPlayer({ sessionId }: Props) {
             height,
             autoPlay: false,
             showController: true,
+            // Авто-скип пассивных периодов (idle-паузы, напр. вкладка
+            // висела без действий): rrweb пропускает gap'ы > порога
+            // вместо проигрывания «застывшего» экрана. Inactive-индикатор
+            // в прогресс-баре остаётся (inactiveColor по дефолту).
+            skipInactive: true,
           },
         })
       } catch (err) {
@@ -218,6 +223,10 @@ export function SessionPlayer({ sessionId }: Props) {
         </Notice>
       )}
       <div ref={containerRef} className="rrweb-player-host" />
+      <p className="text-xs text-muted-foreground">
+        Внешние ресурсы сайта (стили, шрифты, изображения) могут
+        отображаться неточно — это не влияет на анализ поведения посетителя.
+      </p>
     </div>
   )
 }

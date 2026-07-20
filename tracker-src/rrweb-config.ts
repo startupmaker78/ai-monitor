@@ -20,7 +20,11 @@ export const recordConfig: Omit<RecordConfig, 'emit'> = {
     input: 'last',
   },
   recordCanvas: false,
-  collectFonts: false,
+  // collectFonts: инлайним шрифты (base64) в снапшот. Внешние шрифты
+  // сайта (напр. forma.tbank.ru на Tilda) при воспроизведении грузятся
+  // медленно/флапают → плеер показывал fallback («шрифты поплыли»).
+  // Инлайн ≈ +88 KB на FullSnapshot (влезает: 2.68→2.77 MB < 3 MiB cap).
+  collectFonts: true,
   inlineImages: false,
   recordCrossOriginIframes: false,
   checkoutEveryNms: 5 * 60 * 1000,

@@ -193,10 +193,26 @@ function RecommendationDetailCard({ rec }: { rec: Recommendation }) {
           <div className="flex shrink-0 flex-wrap gap-2">
             <Badge variant={priority.variant}>{priority.label}</Badge>
             <Badge variant="outline">{categoryLabel}</Badge>
+            {rec.lowConfidence && (
+              // Отдельная ось от приоритета: severity остаётся главным
+              // бейджем, «мало данных» — вторичный, но заметный (амбер).
+              // «Критично + мало данных» читается как противоречие,
+              // разрешённое прозрачностью.
+              <Badge
+                variant="outline"
+                className="border-amber-300 bg-amber-50 text-amber-800"
+              >
+                ⚠ Мало данных
+              </Badge>
+            )}
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
+        {/* Порядок: что нашли (evidence — конкретика + размер выборки) →
+            почему проблема → что сделать → эффект. evidence раньше был
+            скрыт, хотя содержит «в N из M сессий». */}
+        {rec.evidence && <Section label="Что нашли" value={rec.evidence} />}
         <Section label="Проблема" value={rec.problem} />
         <Section label="Что сделать" value={rec.description} />
         <Section label="Ожидаемый эффект" value={rec.expectedImpact} />
@@ -209,11 +225,6 @@ function RecommendationDetailCard({ rec }: { rec: Recommendation }) {
             <span>
               Метрика:{" "}
               <span className="font-medium text-foreground">{rec.metric}</span>
-            </span>
-          )}
-          {rec.lowConfidence && (
-            <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">
-              низкая уверенность
             </span>
           )}
         </div>

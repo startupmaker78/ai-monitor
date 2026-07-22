@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma"
 import { listKeys, getJson } from "@/lib/storage"
 import type { SessionSummary } from "@/lib/analysis-prompt"
+import { classifyDeviceByUA } from "@/lib/device"
 
 // design decision 2026-05-07: на MVP ограничиваем 50 сессий на анализ;
 // при изменении пересмотреть стоимость и context window Claude.
@@ -558,7 +559,7 @@ function stratifySample<T extends SessionForUaSample>(
     desktop: [],
   }
   for (const s of sessions) {
-    groups[classifyByUA(s.userAgent)].push(s)
+    groups[classifyDeviceByUA(s.userAgent)].push(s)
   }
   const total = sessions.length
   const out: T[] = []
@@ -574,12 +575,6 @@ function stratifySample<T extends SessionForUaSample>(
   return out.slice(0, limit)
 }
 
-function classifyByUA(userAgent: string | null): "mobile" | "tablet" | "desktop" {
-  if (!userAgent) return "desktop"
-  if (/iPad/i.test(userAgent)) return "tablet"
-  if (/iPhone|Android.*Mobile|Mobile/i.test(userAgent)) return "mobile"
-  return "desktop"
-}
 
 function classifyDevice(
   viewportWidth: number,

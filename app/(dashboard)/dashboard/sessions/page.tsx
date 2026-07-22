@@ -3,13 +3,14 @@ import { auth } from "@/auth"
 import { getSessionsForUser } from "@/lib/sessions-data"
 import { SessionsTable } from "./sessions-table"
 import { SiteFilter } from "./site-filter"
+import { TargetFilter } from "./target-filter"
 
 export const metadata = {
   title: "Сессии — Вебмонитор",
 }
 
 type PageProps = {
-  searchParams: { site?: string; sort?: string }
+  searchParams: { site?: string; targetId?: string; sort?: string }
 }
 
 export default async function SessionsPage({ searchParams }: PageProps) {
@@ -21,6 +22,7 @@ export default async function SessionsPage({ searchParams }: PageProps) {
 
   const data = await getSessionsForUser(session.user.id, {
     siteId: searchParams.site,
+    targetId: searchParams.targetId,
     sort,
   })
 
@@ -30,15 +32,23 @@ export default async function SessionsPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-2xl font-semibold tracking-tight">Сессии</h2>
-        {data.sites.length > 1 && (
-          <SiteFilter
-            sites={data.sites}
+        <div className="flex flex-wrap items-center gap-2">
+          {data.sites.length > 1 && (
+            <SiteFilter
+              sites={data.sites}
+              selectedSiteId={data.selectedSiteId}
+              currentSort={sort}
+            />
+          )}
+          <TargetFilter
+            targets={data.targets}
+            selectedTargetId={data.selectedTargetId}
             selectedSiteId={data.selectedSiteId}
             currentSort={sort}
           />
-        )}
+        </div>
       </div>
 
       {data.sessions.length === 0 ? (
@@ -47,7 +57,9 @@ export default async function SessionsPage({ searchParams }: PageProps) {
         <SessionsTable
           sessions={data.sessions}
           selectedSiteId={data.selectedSiteId}
+          selectedTargetId={data.selectedTargetId}
           currentSort={sort}
+          showSite={data.sites.length > 1}
         />
       )}
     </div>

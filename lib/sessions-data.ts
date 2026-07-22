@@ -1,26 +1,38 @@
 import { prisma, withDbRetry } from "@/lib/prisma"
+import { classifyDeviceByUA, type DeviceType } from "@/lib/device"
+import { classifySession, type SessionClass } from "@/lib/session-classification"
+
+export type SessionListItem = {
+  id: string
+  sessionToken: string
+  startedAt: Date
+  endedAt: Date | null
+  // Время последнего долетевшего пакета — для статуса «онлайн» (свежий)
+  // vs «не завершена» (пакеты стихли). null у legacy-сессий до миграции.
+  lastPacketAt: Date | null
+  ipHash: string
+  // Денормализованные/вычисленные на сервере (raw userAgent/eventsCount в
+  // клиент не отдаём). deviceType — по UA; sessionClass — classifySession
+  // (interactionCount/hasFullSnapshot/eventsCount, Фаза 1).
+  deviceType: DeviceType
+  interactionCount: number
+  sessionClass: SessionClass
+  site: { id: string; domain: string; isDemo: boolean }
+  analysisTarget: { id: string; url: string; name: string | null } | null
+}
 
 export type SessionsForUser = {
   sites: Array<{ id: string; domain: string; isDemo: boolean }>
-  sessions: Array<{
-    id: string
-    sessionToken: string
-    startedAt: Date
-    endedAt: Date | null
-    // Время последнего долетевшего пакета — для статуса «онлайн» (свежий)
-    // vs «не завершена» (пакеты стихли). null у legacy-сессий до миграции.
-    lastPacketAt: Date | null
-    eventsCount: number
-    ipHash: string
-    site: { id: string; domain: string; isDemo: boolean }
-    analysisTarget: { id: string; url: string; name: string | null } | null
-  }>
+  // Активные цели выбранного сайта — для фильтра по цели.
+  targets: Array<{ id: string; url: string; name: string | null }>
+  sessions: SessionListItem[]
   selectedSiteId: string | null
+  selectedTargetId: string | null
 }
 
 export async function getSessionsForUser(
   userId: string,
-  options: { siteId?: string; sort?: "newest" | "oldest" } = {},
+  options: { siteId?: string; targetId?: string; sort?: "newest" | "oldest" } = {},
 ): Promise<SessionsForUser> {
   // withDbRetry: SSR-страницы дашборда на scale-to-zero контейнере ловят
   // idle-обрыв TCP к Managed PG на первом запросе после простоя. Без
@@ -39,7 +51,13 @@ export async function getSessionsForUser(
   )
 
   if (!ownerProfile || ownerProfile.sites.length === 0) {
-    return { sites: [], sessions: [], selectedSiteId: null }
+    return {
+      sites: [],
+      targets: [],
+      sessions: [],
+      selectedSiteId: null,
+      selectedTargetId: null,
+    }
   }
 
   const sites = ownerProfile.sites
@@ -50,19 +68,79 @@ export async function getSessionsForUser(
   const validatedSiteId =
     options.siteId && siteIds.includes(options.siteId) ? options.siteId : null
 
-  const sessions = await withDbRetry(() =>
+  // Цели принадлежат сайту. «Эффективный» сайт для фильтра целей: выбранный,
+  // либо единственный сайт юзера (частый случай). При мультисайте без выбора
+  // — целей не показываем (неоднозначно).
+  const effectiveSiteId =
+    validatedSiteId ?? (sites.length === 1 ? sites[0].id : null)
+
+  const targets = effectiveSiteId
+    ? await withDbRetry(() =>
+        prisma.analysisTarget.findMany({
+          where: { siteId: effectiveSiteId, archivedAt: null },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, url: true, name: true },
+        }),
+      )
+    : []
+
+  // Валидируем targetId: только цель из списка (принадлежит сайту юзера).
+  // Смена сайта → targetId чужого сайта не пройдёт → null (сброс).
+  const validatedTargetId =
+    options.targetId && targets.some((t) => t.id === options.targetId)
+      ? options.targetId
+      : null
+
+  const rows = await withDbRetry(() =>
     prisma.session.findMany({
-      where: { siteId: validatedSiteId ?? { in: siteIds } },
+      where: {
+        siteId: validatedSiteId ?? { in: siteIds },
+        ...(validatedTargetId ? { analysisTargetId: validatedTargetId } : {}),
+      },
       orderBy: { startedAt: options.sort === "oldest" ? "asc" : "desc" },
       take: 50,
-      include: {
+      select: {
+        id: true,
+        sessionToken: true,
+        startedAt: true,
+        endedAt: true,
+        lastPacketAt: true,
+        ipHash: true,
+        userAgent: true,
+        interactionCount: true,
+        hasFullSnapshot: true,
+        eventsCount: true,
         site: { select: { id: true, domain: true, isDemo: true } },
         analysisTarget: { select: { id: true, url: true, name: true } },
       },
     }),
   )
 
-  return { sites, sessions, selectedSiteId: validatedSiteId }
+  const sessions: SessionListItem[] = rows.map((r) => ({
+    id: r.id,
+    sessionToken: r.sessionToken,
+    startedAt: r.startedAt,
+    endedAt: r.endedAt,
+    lastPacketAt: r.lastPacketAt,
+    ipHash: r.ipHash,
+    deviceType: classifyDeviceByUA(r.userAgent),
+    interactionCount: r.interactionCount,
+    sessionClass: classifySession({
+      interactionCount: r.interactionCount,
+      hasFullSnapshot: r.hasFullSnapshot,
+      eventsCount: r.eventsCount,
+    }),
+    site: r.site,
+    analysisTarget: r.analysisTarget,
+  }))
+
+  return {
+    sites,
+    targets,
+    sessions,
+    selectedSiteId: validatedSiteId,
+    selectedTargetId: validatedTargetId,
+  }
 }
 
 export type OwnedSession = {

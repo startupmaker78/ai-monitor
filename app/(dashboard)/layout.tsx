@@ -1,6 +1,5 @@
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
-import Link from "next/link"
 import {
   Sidebar,
   SidebarContent,
@@ -26,16 +25,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Home, PlaySquare, Target, Lightbulb, Settings, LogOut, ChevronUp } from "lucide-react"
+import { LogOut, ChevronUp } from "lucide-react"
 import { logout } from "@/app/(auth)/logout/actions"
-
-const NAV_ITEMS = [
-  { title: "Главная", url: "/dashboard", icon: Home },
-  { title: "Сессии", url: "/dashboard/sessions", icon: PlaySquare },
-  { title: "Цели", url: "/dashboard/targets", icon: Target },
-  { title: "Рекомендации", url: "/dashboard/recommendations", icon: Lightbulb },
-  { title: "Настройки", url: "/dashboard/settings", icon: Settings },
-]
+import { SidebarNav } from "./sidebar-nav"
+import { HeaderTitle } from "./header-title"
 
 export default async function DashboardLayout({
   children,
@@ -72,18 +65,7 @@ export default async function DashboardLayout({
           <SidebarGroup>
             <SidebarGroupLabel>Меню</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                {NAV_ITEMS.map((item) => (
-                  <SidebarMenuItem key={item.url}>
-                    <SidebarMenuButton asChild tooltip={item.title}>
-                      <Link href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
+              <SidebarNav />
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
@@ -131,7 +113,7 @@ export default async function DashboardLayout({
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="h-4" />
-          <h1 className="font-semibold">Дашборд</h1>
+          <HeaderTitle />
         </header>
         <main className="flex-1 p-4 md:p-6">{children}</main>
       </SidebarInset>

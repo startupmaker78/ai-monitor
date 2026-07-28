@@ -318,15 +318,30 @@ export function GoalSelect({
       </DropdownMenuContent>
     </DropdownMenu>
       {/* Релевантность выбранной action-цели (вариант C: обе меры viewed,
-          сравнимы напрямую). Инфо, не предупреждение. */}
+          сравнимы напрямую). Инфо + мягкая подсказка страницы (не указание). */}
       {relevance && relevance.total > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Срабатывает у {relevance.onPage.pct}% открывавших эту страницу
-          {relevance.topOther
-            ? `; у ${relevance.topOther.pct}% открывавших ${relevance.topOther.path}`
-            : ""}
-          .
-        </p>
+        <div className="space-y-0.5 text-xs text-muted-foreground">
+          <p>
+            Срабатывает у {relevance.onPage.pct}% открывавших эту страницу
+            {relevance.topOther
+              ? `; у ${relevance.topOther.pct}% открывавших «${
+                  relevance.topOther.label ?? relevance.topOther.path
+                }»`
+              : ""}
+            .
+          </p>
+          {/* Подсказка ТОЛЬКО при заметной разнице (порог 15 п.п. — гипотеза,
+              см. DECISIONS). Помогаем выбрать, не отнимаем: клиент волен
+              анализировать текущую страницу. */}
+          {relevance.topOther &&
+            relevance.topOther.pct > relevance.onPage.pct &&
+            relevance.topOther.pct - relevance.onPage.pct >= 15 && (
+              <p>
+                Если интересно, где она срабатывает, — можно проанализировать и «
+                {relevance.topOther.label ?? relevance.topOther.path}».
+              </p>
+            )}
+        </div>
       )}
     </div>
   )

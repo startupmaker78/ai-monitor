@@ -55,8 +55,10 @@ export type GoalRelevance = {
   total: number
   onPage: { reaches: number; pct: number }
   // Топ-страница (кроме текущей), где цель достигается чаще всего. null если
-  // других страниц нет.
-  topOther: { path: string; reaches: number; pct: number } | null
+  // других страниц нет. label — читаемое имя для показа: название цели сайта,
+  // если topOther совпал с её URL, иначе последний сегмент пути (заполняет
+  // data-слой getGoalRelevance; lib оставляет undefined).
+  topOther: { path: string; reaches: number; pct: number; label?: string } | null
 }
 
 export type ConversionErrorReason =

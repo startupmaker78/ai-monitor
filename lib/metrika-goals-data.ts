@@ -113,5 +113,51 @@ export async function getGoalRelevance(
   } catch {
     return null
   }
-  return fetchGoalRelevance(site.metrikaCounterId, site.metrikaToken, goalId, path)
+  const rel = await fetchGoalRelevance(
+    site.metrikaCounterId,
+    site.metrikaToken,
+    goalId,
+    path,
+  )
+  // Читаемое имя topOther: название цели сайта, если topOther совпал с её URL
+  // (в т.ч. по префиксу — Метрика обрезает длинные пути), иначе последний
+  // сегмент slug (честнее выдуманного). Закрывает TODO про длинный путь.
+  if (rel?.topOther) {
+    rel.topOther.label = await resolveTopOtherLabel(siteId, rel.topOther.path)
+  }
+  return rel
+}
+
+function normPathLocal(p: string): string {
+  const b = p.split("#")[0].split("?")[0].toLowerCase()
+  return b.length > 1 && b.endsWith("/") ? b.slice(0, -1) : b
+}
+
+function lastSegment(path: string): string {
+  const segs = normPathLocal(path).split("/").filter(Boolean)
+  return segs.length ? segs[segs.length - 1] : path
+}
+
+async function resolveTopOtherLabel(
+  siteId: string,
+  otherPath: string,
+): Promise<string> {
+  const op = normPathLocal(otherPath)
+  const targets = await prisma.analysisTarget.findMany({
+    where: { siteId, name: { not: null } },
+    select: { url: true, name: true },
+  })
+  for (const t of targets) {
+    const n = normalizeUrl(t.url)
+    if (!n) continue
+    let tp: string
+    try {
+      tp = normPathLocal(new URL(n).pathname)
+    } catch {
+      continue
+    }
+    // exact или префикс (наш полный путь начинается с обрезанного Метрикой).
+    if ((tp === op || tp.startsWith(op)) && t.name) return t.name
+  }
+  return lastSegment(otherPath)
 }

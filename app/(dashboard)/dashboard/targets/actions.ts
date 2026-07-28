@@ -8,6 +8,11 @@ import { getEffectiveTier } from "@/lib/tier-limits"
 import { validateSiteOwnership } from "@/lib/site-data"
 import { getMinSessionsBudget } from "@/lib/config"
 import { normalizeUrl } from "@/lib/url-normalize"
+import {
+  getGoalsForSite,
+  resolveGoalForSite,
+  type SiteGoalsResult,
+} from "@/lib/metrika-goals-data"
 
 export type ActionResult = {
   ok: boolean
@@ -37,6 +42,8 @@ export async function createTarget(
       .coerce.number()
       .int()
       .min(minSessionsBudget, `Минимум ${minSessionsBudget} сессий`),
+    // Целевое действие — опционально (цель без него = поведенческий анализ).
+    goalId: z.string().max(40).optional().or(z.literal("")),
   })
 
   const parsed = createSchema.safeParse({
@@ -44,6 +51,7 @@ export async function createTarget(
     url: formData.get("url"),
     name: formData.get("name") ?? "",
     sessionsBudget: formData.get("sessionsBudget"),
+    goalId: formData.get("goalId") ?? "",
   })
   if (!parsed.success) {
     const issue = parsed.error.issues[0]
@@ -108,12 +116,40 @@ export async function createTarget(
     }
   }
 
+  // Целевое действие (опционально). Резолвим goalId в авторитетные name/type
+  // из Метрики (не доверяем клиенту) — заодно валидируем, что цель есть в
+  // счётчике и Метрика подключена. Иммутабельности тут нет: цель новая,
+  // DONE-анализа быть не может.
+  let goalData: {
+    metrikaGoalId: string
+    metrikaGoalName: string
+    metrikaGoalType: string
+    goalAttachedAt: Date
+  } | null = null
+  if (parsed.data.goalId) {
+    const resolved = await resolveGoalForSite(
+      session.user.id,
+      parsed.data.siteId,
+      parsed.data.goalId,
+    )
+    if (!resolved.ok) {
+      return { ok: false, error: goalErrorMessage(resolved.reason) }
+    }
+    goalData = {
+      metrikaGoalId: parsed.data.goalId,
+      metrikaGoalName: resolved.name,
+      metrikaGoalType: resolved.type,
+      goalAttachedAt: new Date(),
+    }
+  }
+
   await prisma.analysisTarget.create({
     data: {
       siteId: parsed.data.siteId,
       url: parsed.data.url,
       name: parsed.data.name || null,
       sessionsBudget: parsed.data.sessionsBudget,
+      ...(goalData ?? {}),
       // status default ACTIVE из schema.
     },
   })
@@ -125,6 +161,110 @@ export async function createTarget(
     ok: true,
     message: "Цель создана. Сбор сессий начнётся автоматически.",
   }
+}
+
+// Тексты ошибок резолва/сохранения целевого действия. Ни один не показывает
+// «0%» и каждый говорит, что делать (см. DECISIONS 2026-07-28, 2A.2).
+function goalErrorMessage(
+  reason:
+    | "forbidden"
+    | "not_configured"
+    | "goal_not_found"
+    | "metrika_unavailable"
+    | "auth_failed"
+    | "counter_forbidden"
+    | "rate_limited",
+): string {
+  switch (reason) {
+    case "not_configured":
+      return "Сначала подключите Яндекс.Метрику в Настройках → Метрика."
+    case "goal_not_found":
+      return "Цель не найдена в счётчике Метрики. Обновите список и выберите заново."
+    case "auth_failed":
+      return "Токен Яндекс.Метрики истёк или недействителен. Обновите его в Настройках → Метрика."
+    case "counter_forbidden":
+      return "Метрика отклонила запрос — токен недействителен или нет доступа к счётчику. Проверьте токен и права в Настройках → Метрика."
+    case "rate_limited":
+      return "Слишком много обращений к Метрике. Подождите пару минут."
+    case "forbidden":
+      return "Сайт не найден."
+    default:
+      return "Яндекс.Метрика временно недоступна. Попробуйте позже."
+  }
+}
+
+// Ленивая загрузка целей счётчика для дропдауна (вызывается при открытии,
+// не на рендер страницы). Возвращает цели БЕЗ токена.
+export async function loadSiteGoals(siteId: string): Promise<SiteGoalsResult> {
+  const session = await auth()
+  if (!session?.user?.id) return { ok: false, reason: "forbidden" }
+  return getGoalsForSite(session.user.id, siteId)
+}
+
+// Установка/смена/сброс целевого действия у цели. Гейты: ownership +
+// иммутабельность (нет DONE-анализа) + (при установке) валидность goalId в
+// счётчике. Дублирует клиентский гейт goalLocked — клиенту не доверяем.
+export async function setTargetGoal(
+  targetId: string,
+  goalId: string, // "" = сбросить
+): Promise<ActionResult> {
+  const session = await auth()
+  if (!session?.user?.id) return { ok: false, error: "Не авторизован" }
+
+  const target = await prisma.analysisTarget.findUnique({
+    where: { id: targetId },
+    select: {
+      id: true,
+      siteId: true,
+      analyses: { where: { status: "DONE" }, select: { id: true }, take: 1 },
+    },
+  })
+  if (!target) return { ok: false, error: "Цель не найдена" }
+
+  const owns = await validateSiteOwnership(target.siteId, session.user.id)
+  if (!owns) return { ok: false, error: "Цель не найдена" }
+
+  // Иммутабельность: после первого DONE-анализа менять действие нельзя
+  // (иначе прежние рекомендации противоречили бы новой цифре).
+  if (target.analyses.length > 0) {
+    return {
+      ok: false,
+      error:
+        "Целевое действие зафиксировано после первого анализа — сменить его нельзя.",
+    }
+  }
+
+  // Сброс.
+  if (!goalId) {
+    await prisma.analysisTarget.update({
+      where: { id: targetId },
+      data: {
+        metrikaGoalId: null,
+        metrikaGoalName: null,
+        metrikaGoalType: null,
+        goalAttachedAt: null,
+      },
+    })
+    revalidatePath("/dashboard/targets")
+    return { ok: true, message: "Целевое действие сброшено" }
+  }
+
+  // Установка: резолвим авторитетные name/type из Метрики.
+  const resolved = await resolveGoalForSite(session.user.id, target.siteId, goalId)
+  if (!resolved.ok) return { ok: false, error: goalErrorMessage(resolved.reason) }
+
+  await prisma.analysisTarget.update({
+    where: { id: targetId },
+    data: {
+      metrikaGoalId: goalId,
+      metrikaGoalName: resolved.name,
+      metrikaGoalType: resolved.type,
+      goalAttachedAt: new Date(),
+    },
+  })
+  revalidatePath("/dashboard/targets")
+  revalidatePath("/dashboard/recommendations")
+  return { ok: true, message: `Целевое действие: ${resolved.name}` }
 }
 
 const archiveSchema = z.object({

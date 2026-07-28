@@ -49,6 +49,7 @@ export default async function TargetsPage({ searchParams }: PageProps) {
 
       <TargetsClient
         siteId={data.selectedSite.id}
+        metrikaConfigured={data.selectedSite.metrikaConfigured}
         tier={data.tier}
         activeTargets={data.activeTargets}
         archivedTargets={data.archivedTargets}

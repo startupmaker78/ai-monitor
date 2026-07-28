@@ -4,9 +4,11 @@ import {
   loadRecommendationsForTarget,
   loadTargetsWithRecommendations,
 } from "@/lib/recommendations-data"
+import { getGoalConversionForTarget } from "@/lib/goal-conversion-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { TargetSelector } from "./target-selector"
 import { RecommendationsClient } from "./recommendations-client"
+import { ConversionBlock } from "./conversion-block"
 
 export const metadata = { title: "Рекомендации — Вебмонитор" }
 
@@ -44,7 +46,10 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
       ? requestedId
       : targets[0].id
 
-  const data = await loadRecommendationsForTarget(userId, selectedId)
+  const [data, conversion] = await Promise.all([
+    loadRecommendationsForTarget(userId, selectedId),
+    getGoalConversionForTarget(userId, selectedId),
+  ])
   if (!data) {
     // Не должно случаться: selectedId только что взят из targets. Если
     // случилось — race с удалением цели: отдаём empty state.
@@ -77,6 +82,10 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
           </span>
         </p>
       </div>
+
+      {/* «Сколько» — Метрика, отдельным блоком над анализом («почему»).
+          Два слоя не смешиваем (Этап 0). */}
+      <ConversionBlock conversion={conversion} />
 
       {/* key={target.id}: смена цели = ремоунт → selectedAnalysisIndex
           сбрасывается в 0 (последний анализ новой цели). */}

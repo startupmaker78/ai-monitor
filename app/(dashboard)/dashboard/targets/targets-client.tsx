@@ -1,10 +1,10 @@
 "use client"
 
 import { useFormState, useFormStatus } from "react-dom"
-import { useState } from "react"
+import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { CheckCircle2, Loader2 } from "lucide-react"
+import { CheckCircle2, Loader2, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -26,13 +26,18 @@ import {
 import {
   createTarget,
   archiveTarget,
+  setTargetGoal,
   type ActionResult,
 } from "./actions"
+import { GoalSelect } from "./goal-select"
 import type { TargetWithStats } from "@/lib/targets-data"
 import type { TierConfig } from "@/lib/tier-limits"
 
+type PickedGoal = { id: string; name: string; type: string } | null
+
 type Props = {
   siteId: string
+  metrikaConfigured: boolean
   tier: TierConfig
   activeTargets: TargetWithStats[]
   archivedTargets: TargetWithStats[]
@@ -75,6 +80,7 @@ function ArchiveSubmitButton() {
 
 export function TargetsClient(props: Props) {
   const [createState, createAction] = useFormState(createTarget, initialState)
+  const [createGoal, setCreateGoal] = useState<PickedGoal>(null)
   const canCreate =
     props.targetsRemaining > 0 &&
     props.sessionsRemaining >= props.minSessionsBudget
@@ -161,6 +167,37 @@ export function TargetsClient(props: Props) {
               </p>
             </div>
 
+            {/* Целевое действие (опционально). Метрика считает конверсию по
+                нему; без действия — обычный поведенческий анализ. */}
+            <div className="space-y-2">
+              <Label>Целевое действие (необязательно)</Label>
+              <input type="hidden" name="goalId" value={createGoal?.id ?? ""} />
+              {props.metrikaConfigured ? (
+                <GoalSelect
+                  siteId={props.siteId}
+                  currentGoalId={createGoal?.id ?? null}
+                  currentGoalName={createGoal?.name ?? null}
+                  disabled={!canCreate}
+                  onPick={setCreateGoal}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Чтобы измерять конверсию по цели,{" "}
+                  <Link
+                    href="/dashboard/settings/metrika"
+                    className="font-medium underline underline-offset-2"
+                  >
+                    подключите Яндекс.Метрику
+                  </Link>
+                  . Без неё цель анализируется по поведению.
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Метрика посчитает, какой процент посетителей доходит до этого
+                действия. Можно задать позже.
+              </p>
+            </div>
+
             {createState?.ok === false && createState.error && (
               <p className="text-sm text-destructive">{createState.error}</p>
             )}
@@ -187,6 +224,8 @@ export function TargetsClient(props: Props) {
               <TargetCard
                 key={t.id}
                 target={t}
+                siteId={props.siteId}
+                metrikaConfigured={props.metrikaConfigured}
                 minSessionsBudget={props.minSessionsBudget}
               />
             ))}
@@ -205,6 +244,8 @@ export function TargetsClient(props: Props) {
                 key={t.id}
                 target={t}
                 archived
+                siteId={props.siteId}
+                metrikaConfigured={props.metrikaConfigured}
                 minSessionsBudget={props.minSessionsBudget}
               />
             ))}
@@ -258,10 +299,14 @@ type AnalyzeNotice =
 function TargetCard({
   target,
   archived = false,
+  siteId,
+  metrikaConfigured,
   minSessionsBudget,
 }: {
   target: TargetWithStats
   archived?: boolean
+  siteId: string
+  metrikaConfigured: boolean
   minSessionsBudget: number
 }) {
   const [archiveState, archiveAction] = useFormState(
@@ -271,7 +316,21 @@ function TargetCard({
   const [confirmMode, setConfirmMode] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [notice, setNotice] = useState<AnalyzeNotice | null>(null)
+  const [goalPending, startGoalTransition] = useTransition()
+  const [goalError, setGoalError] = useState<string | null>(null)
   const router = useRouter()
+
+  function handleGoalPick(goal: PickedGoal) {
+    setGoalError(null)
+    startGoalTransition(async () => {
+      const r = await setTargetGoal(target.id, goal?.id ?? "")
+      if (r.ok) {
+        router.refresh()
+      } else {
+        setGoalError(r.error ?? "Не удалось сохранить действие")
+      }
+    })
+  }
 
   const progress =
     target.sessionsBudget > 0
@@ -339,7 +398,7 @@ function TargetCard({
   }
 
   return (
-    <Card className={archived ? "opacity-60" : ""}>
+    <Card id={`target-${target.id}`} className={archived ? "opacity-60" : ""}>
       <CardContent className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
@@ -373,6 +432,50 @@ function TargetCard({
                 archiveAction={archiveAction}
               />
             </div>
+          )}
+        </div>
+        {/* Целевое действие (Path M). Архивные — read-only. Активные:
+            GoalSelect для смены, если не зафиксировано (goalLocked). */}
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+          <span className="text-xs text-muted-foreground">
+            Целевое действие:
+          </span>
+          {archived ? (
+            <span className="text-sm">{target.metrikaGoalName ?? "—"}</span>
+          ) : target.goalLocked ? (
+            <span className="flex items-center gap-1 text-sm">
+              <Lock className="h-3 w-3 opacity-60" />
+              {target.metrikaGoalName ?? "—"}
+              <span className="text-xs text-muted-foreground">
+                (зафиксировано после первого анализа)
+              </span>
+            </span>
+          ) : metrikaConfigured ? (
+            <span className="flex items-center gap-2">
+              <GoalSelect
+                siteId={siteId}
+                currentGoalId={target.metrikaGoalId}
+                currentGoalName={target.metrikaGoalName}
+                disabled={goalPending}
+                onPick={handleGoalPick}
+              />
+              {goalPending && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+              )}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              <Link
+                href="/dashboard/settings/metrika"
+                className="underline underline-offset-2"
+              >
+                Подключите Метрику
+              </Link>
+              , чтобы задать
+            </span>
+          )}
+          {goalError && (
+            <span className="text-xs text-destructive">{goalError}</span>
           )}
         </div>
         {!archived && analyzing && (

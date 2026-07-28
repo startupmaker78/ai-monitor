@@ -11,11 +11,22 @@ export type TargetWithStats = {
   sessionsBudget: number
   archivedAt: Date | null
   createdAt: Date
+  // Целевое действие (Path M). Имя/тип — локальный дубль из Метрики (UI не
+  // падает, когда Метрика недоступна/цель удалена).
+  metrikaGoalId: string | null
+  metrikaGoalName: string | null
+  metrikaGoalType: string | null
+  // Иммутабельность действия: true если у цели есть DONE-анализ — сменить
+  // действие уже нельзя (иначе прежние рекомендации противоречили бы новой
+  // цифре). Гейт дублируется на сервере в setTargetGoal.
+  goalLocked: boolean
 }
 
 export type TargetsPageData = {
   sites: Array<{ id: string; domain: string; isDemo: boolean }>
-  selectedSite: { id: string; domain: string; isDemo: boolean } | null
+  // metrikaConfigured — факт наличия токена (сам токен в клиент НЕ уходит).
+  // Гейтит дропдаун выбора действия.
+  selectedSite: { id: string; domain: string; isDemo: boolean; metrikaConfigured: boolean } | null
   tier: TierConfig
   activeTargets: TargetWithStats[]
   archivedTargets: TargetWithStats[]
@@ -48,7 +59,7 @@ export async function getTargetsPageData(
   const selectedSite =
     sites.find((s) => s.id === requestedSiteId) ?? sites[0]
 
-  const allTargets = await prisma.analysisTarget.findMany({
+  const allTargetsRaw = await prisma.analysisTarget.findMany({
     where: { siteId: selectedSite.id },
     orderBy: [
       { archivedAt: "asc" }, // null (active) выше
@@ -63,8 +74,29 @@ export async function getTargetsPageData(
       sessionsBudget: true,
       archivedAt: true,
       createdAt: true,
+      metrikaGoalId: true,
+      metrikaGoalName: true,
+      metrikaGoalType: true,
+      // Наличие хотя бы одного DONE-анализа → goalLocked. take:1 — нам нужен
+      // только факт, не список.
+      analyses: { where: { status: "DONE" }, select: { id: true }, take: 1 },
     },
   })
+
+  const allTargets: TargetWithStats[] = allTargetsRaw.map((t) => ({
+    id: t.id,
+    url: t.url,
+    name: t.name,
+    status: t.status,
+    sessionsCollected: t.sessionsCollected,
+    sessionsBudget: t.sessionsBudget,
+    archivedAt: t.archivedAt,
+    createdAt: t.createdAt,
+    metrikaGoalId: t.metrikaGoalId,
+    metrikaGoalName: t.metrikaGoalName,
+    metrikaGoalType: t.metrikaGoalType,
+    goalLocked: t.analyses.length > 0,
+  }))
 
   const activeTargets = allTargets.filter((t) => t.archivedAt === null)
   const archivedTargets = allTargets.filter((t) => t.archivedAt !== null)
@@ -93,6 +125,8 @@ export async function getTargetsPageData(
       id: selectedSite.id,
       domain: selectedSite.domain,
       isDemo: selectedSite.isDemo,
+      // Токен НЕ отдаём в клиент — только факт его наличия.
+      metrikaConfigured: Boolean(selectedSite.metrikaToken),
     },
     tier,
     activeTargets,

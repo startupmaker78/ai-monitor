@@ -235,8 +235,20 @@ export function buildAnalysisPrompt(input: AnalysisInput): {
   userParts.push(``)
   userParts.push(`СОБРАНО СЕССИЙ ДЛЯ АНАЛИЗА: ${input.sessionsCount}`)
   userParts.push(``)
-  userParts.push(`СУММАРИ СЕССИЙ:`)
-  userParts.push(JSON.stringify(input.sessionSummaries, null, 2))
+  // Явный номер сессии в САМОМ объекте (поле "session", 1..N) — чтобы модель
+  // ссылалась на реальные id, а не выдумывала индекс по позиции в массиве
+  // (галлюцинация «сессия 20» при 19 проанализированных, Этап 4). Ссылки
+  // строго в диапазоне 1..N.
+  const n = input.sessionSummaries.length
+  const numberedSummaries = input.sessionSummaries.map((s, i) => ({
+    session: i + 1,
+    ...s,
+  }))
+  userParts.push(
+    `СУММАРИ СЕССИЙ (каждая помечена полем "session" — номер от 1 до ${n}; ` +
+      `ссылайся на сессии ТОЛЬКО по этим номерам, НЕ выдумывай сессии вне диапазона 1..${n}):`,
+  )
+  userParts.push(JSON.stringify(numberedSummaries, null, 2))
   userParts.push(``)
   userParts.push(
     `Дай 5-10 конкретных рекомендаций как улучшить эту страницу. Возвращай только JSON-массив без какого-либо текста до или после.`,

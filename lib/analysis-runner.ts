@@ -13,6 +13,7 @@ import {
 import { getEffectiveTier } from "@/lib/tier-limits"
 import { validateSiteOwnership } from "@/lib/site-data"
 import { getMinSessionsBudget } from "@/lib/config"
+import { getGoalConversionForTarget } from "@/lib/goal-conversion-data"
 
 export type RunAnalysisError =
   | "unauthorized"
@@ -245,12 +246,75 @@ export async function runAnalysis(
     sessionsCount: sessionSummaries.length,
   })
 
+  // Path M: конверсия из Метрики (ГОТОВЫЙ ФАКТ) + смещение выборки. Всё
+  // best-effort — НИКОГДА не блокирует анализ: цель без действия / Метрика
+  // недоступна → поведенческий анализ ровно как раньше (goal/sample могут
+  // быть undefined, buildAnalysisPrompt их просто опустит).
+  let goalInput: AnalysisInput["goal"]
+  let sampleInput: AnalysisInput["sample"]
+  try {
+    const conv = await getGoalConversionForTarget(userId, targetId)
+    let coverage: NonNullable<AnalysisInput["sample"]>["coverage"]
+
+    if (conv.state === "ok") {
+      goalInput = {
+        kind: "conversion",
+        name: conv.goalName ?? "целевое действие",
+        conversionRate: conv.conversionRate,
+        sampleVisits: conv.sampleVisits,
+        period: conv.period,
+        lowConfidence: conv.lowConfidence,
+      }
+      // Покрытие считаем ТОЛЬКО когда есть период конверсии (иначе не с чем
+      // сравнивать окно записей).
+      const agg = await prisma.session.aggregate({
+        where: { analysisTargetId: targetId },
+        _min: { startedAt: true },
+        _max: { startedAt: true },
+      })
+      if (agg._min.startedAt && agg._max.startedAt) {
+        const dayMs = 86_400_000
+        const recTo = agg._max.startedAt
+        const recordDays =
+          Math.round((recTo.getTime() - agg._min.startedAt.getTime()) / dayMs) + 1
+        const convTo = new Date(conv.period.to + "T00:00:00Z")
+        const uncovered = isNaN(convTo.getTime())
+          ? 0
+          : Math.max(0, Math.round((convTo.getTime() - recTo.getTime()) / dayMs))
+        coverage = {
+          recordsFrom: agg._min.startedAt.toISOString().slice(0, 10),
+          recordsTo: recTo.toISOString().slice(0, 10),
+          recordDays: Math.max(1, recordDays),
+          uncoveredDaysAfterLastRecord: uncovered,
+        }
+      }
+    } else if (conv.state === "error") {
+      // Цель задана, но конверсия недоступна (mismatch/unavailable/…).
+      goalInput = { kind: "unavailable", name: conv.goalName }
+    }
+    // not_set / not_configured / target_not_found → goalInput остаётся
+    // undefined → блок ЦЕЛЕВОЕ ДЕЙСТВИЕ не добавляется.
+
+    sampleInput = {
+      analyzedCount: sessionSummaries.length,
+      droppedNoAction: collected.skipped.noInteractions,
+      coverage,
+    }
+  } catch (err) {
+    console.warn(
+      "[analysis-runner] goal/conversion enrichment skipped:",
+      (err as Error).message,
+    )
+  }
+
   const input: AnalysisInput = {
     target: { url: target.url, name: target.name },
     site: { domain: target.site.domain, isDemo: target.site.isDemo },
     metrics: aggregateMetrics(snapshots),
     sessionsCount: sessionSummaries.length,
     sessionSummaries,
+    goal: goalInput,
+    sample: sampleInput,
   }
 
   // 10. Промпт.

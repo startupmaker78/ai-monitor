@@ -76,6 +76,14 @@ function urlGoalMatchesPage(
 
 // Приглушённый инфо-бейдж для цели (детерминированно, 0 вызовов). null = нет.
 function goalWarning(goal: GoalWithReaches, pageUrl?: string): string | null {
+  // Сигнал объёма — раньше остальных: цель без единого достижения за период
+  // = анализировать нечего (конверсия 0%/no_data) независимо от типа. Порог
+  // ровно 0: «не срабатывала» факт-верно только при 0; 1-2 достижения ЦЕЛЬ
+  // засчитала (тонкие данные ловит lowConfidence при анализе), их этим
+  // бейджем не оговариваем.
+  if (goal.reaches === 0) {
+    return "за период не срабатывала — анализировать нечего"
+  }
   if (goal.type === "visit_duration" || goal.type === "number") {
     return "вовлечённость, а не бизнес-действие — конверсия по ней мало что скажет"
   }
@@ -92,6 +100,19 @@ function goalWarning(goal: GoalWithReaches, pageUrl?: string): string | null {
     return "футерная — конверсия ~одинакова на всех страницах"
   }
   return null
+}
+
+// Сортировка пользовательских целей в 2 яруса: сверху релевантные (без
+// бейджа) по достижениям, снизу демотированные (любой сигнал goalWarning) по
+// достижениям — так демотированные с трафиком стоят выше мёртвых (0). 0
+// вызовов, из загруженного списка.
+function byRelevance(pageUrl?: string) {
+  return (a: GoalWithReaches, b: GoalWithReaches): number => {
+    const da = goalWarning(a, pageUrl) ? 1 : 0
+    const db = goalWarning(b, pageUrl) ? 1 : 0
+    if (da !== db) return da - db
+    return b.reaches - a.reaches
+  }
 }
 
 // Короткие RU-подписи типов целей Метрики (для читаемости в списке).
@@ -251,7 +272,7 @@ export function GoalSelect({
                 В счётчике нет пользовательских целей.
               </div>
             )}
-            {data.user.map((g) => (
+            {[...data.user].sort(byRelevance(pageUrl)).map((g) => (
               <GoalRow
                 key={g.id}
                 goal={g}

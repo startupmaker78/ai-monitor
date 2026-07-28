@@ -81,6 +81,8 @@ function ArchiveSubmitButton() {
 export function TargetsClient(props: Props) {
   const [createState, createAction] = useFormState(createTarget, initialState)
   const [createGoal, setCreateGoal] = useState<PickedGoal>(null)
+  // Контролируем url — нужен для url-бейджа и релевантности в GoalSelect.
+  const [createUrl, setCreateUrl] = useState("")
   const canCreate =
     props.targetsRemaining > 0 &&
     props.sessionsRemaining >= props.minSessionsBudget
@@ -127,6 +129,8 @@ export function TargetsClient(props: Props) {
                 name="url"
                 type="url"
                 placeholder="https://site.ru/pricing"
+                value={createUrl}
+                onChange={(e) => setCreateUrl(e.target.value)}
                 required
                 disabled={!canCreate}
               />
@@ -177,6 +181,8 @@ export function TargetsClient(props: Props) {
                   siteId={props.siteId}
                   currentGoalId={createGoal?.id ?? null}
                   currentGoalName={createGoal?.name ?? null}
+                  currentGoalType={createGoal?.type ?? null}
+                  pageUrl={createUrl}
                   disabled={!canCreate}
                   onPick={setCreateGoal}
                 />
@@ -456,6 +462,8 @@ function TargetCard({
                 siteId={siteId}
                 currentGoalId={target.metrikaGoalId}
                 currentGoalName={target.metrikaGoalName}
+                currentGoalType={target.metrikaGoalType}
+                pageUrl={target.url}
                 disabled={goalPending}
                 onPick={handleGoalPick}
               />

@@ -11,8 +11,10 @@ import { normalizeUrl } from "@/lib/url-normalize"
 import {
   getGoalsForSite,
   resolveGoalForSite,
+  getGoalRelevance,
   type SiteGoalsResult,
 } from "@/lib/metrika-goals-data"
+import type { GoalRelevance } from "@/lib/metrika-goals"
 
 export type ActionResult = {
   ok: boolean
@@ -199,6 +201,18 @@ export async function loadSiteGoals(siteId: string): Promise<SiteGoalsResult> {
   const session = await auth()
   if (!session?.user?.id) return { ok: false, reason: "forbidden" }
   return getGoalsForSite(session.user.id, siteId)
+}
+
+// Релевантность выбранной цели странице (3 вызова Метрики) — ТОЛЬКО при
+// выборе конкретной цели, не при открытии дропдауна. null → UI не показывает.
+export async function loadGoalRelevance(
+  siteId: string,
+  goalId: string,
+  pageUrl: string,
+): Promise<GoalRelevance | null> {
+  const session = await auth()
+  if (!session?.user?.id) return null
+  return getGoalRelevance(session.user.id, siteId, goalId, pageUrl)
 }
 
 // Установка/смена/сброс целевого действия у цели. Гейты: ownership +

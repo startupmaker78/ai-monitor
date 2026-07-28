@@ -45,6 +45,18 @@ export type MetrikaGoal = {
   name: string
   type: string // "action" | "url" | "phone" | "social" | ... (as-is из Метрики)
   source: "user" | "auto"
+  // Только для type==="url": условие цели (contain/exact/start/regexp + url).
+  // Нужно для детерминированной оценки релевантности странице (0 вызовов).
+  urlCondition?: { type: string; url: string }
+}
+
+// Релевантность цели странице (вариант C, 3 вызова, ОБЕ меры — viewed).
+export type GoalRelevance = {
+  total: number
+  onPage: { reaches: number; pct: number }
+  // Топ-страница (кроме текущей), где цель достигается чаще всего. null если
+  // других страниц нет.
+  topOther: { path: string; reaches: number; pct: number } | null
 }
 
 export type ConversionErrorReason =
@@ -150,11 +162,20 @@ export async function fetchMetrikaGoals(
   if (!Array.isArray(raw)) return { ok: false, reason: "metrika_unavailable" }
   const goals: MetrikaGoal[] = raw.map((g) => {
     const o = g as Record<string, unknown>
+    const type = typeof o.type === "string" ? o.type : ""
+    let urlCondition: MetrikaGoal["urlCondition"]
+    if (type === "url" && Array.isArray(o.conditions) && o.conditions[0]) {
+      const c = o.conditions[0] as Record<string, unknown>
+      if (typeof c.type === "string" && typeof c.url === "string") {
+        urlCondition = { type: c.type, url: c.url }
+      }
+    }
     return {
       id: String(o.id),
       name: typeof o.name === "string" ? o.name : "",
-      type: typeof o.type === "string" ? o.type : "",
+      type,
       source: o.goal_source === "user" ? "user" : "auto",
+      urlCondition,
     }
   })
   return { ok: true, goals }
@@ -362,6 +383,106 @@ function mapConversionReason(r: {
         : "metrika_unavailable"
     default:
       return "metrika_unavailable"
+  }
+}
+
+// ─── Релевантность цели странице (вариант C, 3 вызова) ───────────────────
+
+const RELEVANCE_PERIOD = { date1: "180daysAgo", date2: "yesterday" }
+
+async function goalReaches(
+  counterId: string,
+  token: string,
+  goalId: string,
+  filter?: string,
+): Promise<number> {
+  const params: Record<string, string> = {
+    id: counterId,
+    metrics: `ym:s:goal${goalId}reaches`,
+    accuracy: "full",
+    ...RELEVANCE_PERIOD,
+  }
+  if (filter) params.filters = filter
+  const r = await metrikaGet(statUrl(params), token)
+  if (!r.ok) return 0
+  const t = (r.json as { totals?: number[] }).totals
+  return Array.isArray(t) ? (t[0] ?? 0) : 0
+}
+
+// Нормализация пути для сравнения «эта страница vs другая» (срез #/?, хвост-
+// слэша, регистр). Root "/" сохраняем.
+function normPath(p: string): string {
+  const base = p.split("#")[0].split("?")[0].toLowerCase()
+  return base.length > 1 && base.endsWith("/") ? base.slice(0, -1) : base
+}
+
+// 3 вызова: (1) распределение достижений по странице ВХОДА → total + топ-
+// страница ≠ текущей; (2) достижения среди ОТКРЫВАВШИХ текущую страницу
+// (viewed, truncation-safe); (3) то же для топ-другой страницы (её путь —
+// значение Метрики → exact ==). onPage.pct и topOther.pct — обе viewed/total,
+// сравнимы напрямую (вариант C: не смешиваем линзы).
+export async function fetchGoalRelevance(
+  counterId: string,
+  token: string,
+  goalId: string,
+  pagePath: string,
+): Promise<GoalRelevance | null> {
+  // (1) entry-распределение.
+  const r1 = await metrikaGet(
+    statUrl({
+      id: counterId,
+      metrics: `ym:s:goal${goalId}reaches`,
+      dimensions: "ym:s:startURLPathFull",
+      accuracy: "full",
+      limit: "15",
+      sort: `-ym:s:goal${goalId}reaches`,
+      ...RELEVANCE_PERIOD,
+    }),
+    token,
+  )
+  if (!r1.ok) return null
+  const j1 = r1.json as {
+    totals?: number[]
+    data?: Array<{ dimensions: Array<{ name: string }>; metrics: number[] }>
+  }
+  const total = j1.totals?.[0] ?? 0
+  if (total === 0) {
+    return { total: 0, onPage: { reaches: 0, pct: 0 }, topOther: null }
+  }
+
+  // (2) onPage viewed — truncation-safe по длине (exact для короткого,
+  // glob-префикс для длинного; без retry, чтобы удержать 3 вызова).
+  const onPageFilter =
+    pagePath.length > GLOB_SAFE_PREFIX_LEN
+      ? `ym:pv:URLPathFull=*'${pagePath.slice(0, GLOB_SAFE_PREFIX_LEN)}*'`
+      : `ym:pv:URLPathFull=='${pagePath}'`
+  const onPageReaches = await goalReaches(counterId, token, goalId, onPageFilter)
+
+  // Топ-страница входа, отличная от текущей.
+  const otherRow = (j1.data ?? []).find(
+    (row) => normPath(row.dimensions[0]?.name ?? "") !== normPath(pagePath),
+  )
+  let topOther: GoalRelevance["topOther"] = null
+  if (otherRow) {
+    const otherPath = otherRow.dimensions[0].name
+    // (3) viewed на топ-другой (путь — значение Метрики → exact ==).
+    const otherReaches = await goalReaches(
+      counterId,
+      token,
+      goalId,
+      `ym:pv:URLPathFull=='${otherPath}'`,
+    )
+    topOther = {
+      path: otherPath,
+      reaches: otherReaches,
+      pct: Math.round((100 * otherReaches) / total),
+    }
+  }
+
+  return {
+    total,
+    onPage: { reaches: onPageReaches, pct: Math.round((100 * onPageReaches) / total) },
+    topOther,
   }
 }
 

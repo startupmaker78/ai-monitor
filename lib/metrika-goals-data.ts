@@ -1,10 +1,13 @@
 import { prisma } from "@/lib/prisma"
 import { validateSiteOwnership } from "@/lib/site-data"
+import { normalizeUrl } from "@/lib/url-normalize"
 import {
   fetchMetrikaGoals,
   fetchGoalReaches,
+  fetchGoalRelevance,
   sortAndGroupGoals,
   type MetrikaGoal,
+  type GoalRelevance,
 } from "@/lib/metrika-goals"
 
 // Серверный data-слой над lib/metrika-goals: грузит цели счётчика для UI
@@ -84,4 +87,31 @@ export async function resolveGoalForSite(
   const found = all.find((g) => g.id === goalId)
   if (!found) return { ok: false, reason: "goal_not_found" }
   return { ok: true, name: found.name, type: found.type }
+}
+
+// Релевантность цели странице (вариант C, 3 вызова Метрики). Токен не наружу.
+// Возвращает null при отсутствии доступа/конфигурации/ошибке Метрики — UI
+// тогда просто не показывает инфо-строку (это доп. данные, не критично).
+export async function getGoalRelevance(
+  userId: string,
+  siteId: string,
+  goalId: string,
+  pageUrl: string,
+): Promise<GoalRelevance | null> {
+  const owns = await validateSiteOwnership(siteId, userId)
+  if (!owns) return null
+  const site = await prisma.site.findUnique({
+    where: { id: siteId },
+    select: { metrikaCounterId: true, metrikaToken: true },
+  })
+  if (!site?.metrikaCounterId || !site.metrikaToken) return null
+  const normalized = normalizeUrl(pageUrl)
+  if (!normalized) return null
+  let path: string
+  try {
+    path = new URL(normalized).pathname
+  } catch {
+    return null
+  }
+  return fetchGoalRelevance(site.metrikaCounterId, site.metrikaToken, goalId, path)
 }

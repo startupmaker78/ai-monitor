@@ -16,9 +16,10 @@ export type TargetWithStats = {
   metrikaGoalId: string | null
   metrikaGoalName: string | null
   metrikaGoalType: string | null
-  // Иммутабельность действия: true если у цели есть DONE-анализ — сменить
-  // действие уже нельзя (иначе прежние рекомендации противоречили бы новой
-  // цифре). Гейт дублируется на сервере в setTargetGoal.
+  // Иммутабельность действия: true если действие ЗАДАНО И есть DONE-анализ —
+  // сменить его уже нельзя (иначе прежние рекомендации противоречили бы новой
+  // цифре). ПЕРВАЯ установка на цель с анализами (действие ещё не задано) —
+  // разрешена (противоречить нечему). Гейт дублируется в setTargetGoal.
   goalLocked: boolean
 }
 
@@ -95,7 +96,7 @@ export async function getTargetsPageData(
     metrikaGoalId: t.metrikaGoalId,
     metrikaGoalName: t.metrikaGoalName,
     metrikaGoalType: t.metrikaGoalType,
-    goalLocked: t.analyses.length > 0,
+    goalLocked: t.metrikaGoalId !== null && t.analyses.length > 0,
   }))
 
   const activeTargets = allTargets.filter((t) => t.archivedAt === null)

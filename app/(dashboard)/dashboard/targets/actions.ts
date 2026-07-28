@@ -216,6 +216,7 @@ export async function setTargetGoal(
     select: {
       id: true,
       siteId: true,
+      metrikaGoalId: true,
       analyses: { where: { status: "DONE" }, select: { id: true }, take: 1 },
     },
   })
@@ -224,9 +225,12 @@ export async function setTargetGoal(
   const owns = await validateSiteOwnership(target.siteId, session.user.id)
   if (!owns) return { ok: false, error: "Цель не найдена" }
 
-  // Иммутабельность: после первого DONE-анализа менять действие нельзя
-  // (иначе прежние рекомендации противоречили бы новой цифре).
-  if (target.analyses.length > 0) {
+  // Иммутабельность: менять/сбрасывать УЖЕ ЗАДАННОЕ действие после DONE-анализа
+  // нельзя (прежние рекомендации противоречили бы новой цифре). ПЕРВАЯ
+  // установка на цель с анализами (действие ещё не задано) — РАЗРЕШЕНА:
+  // противоречить нечему, старые поведенческие рекомендации ни на какой
+  // процент не опирались.
+  if (target.metrikaGoalId !== null && target.analyses.length > 0) {
     return {
       ok: false,
       error:

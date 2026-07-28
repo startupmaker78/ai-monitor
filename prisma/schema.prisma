@@ -204,6 +204,19 @@ model AnalysisTarget {
   site              Site                 @relation(fields: [siteId], references: [id], onDelete: Restrict)
   url               String
   name              String?
+  // Целевое действие (Path M, DECISIONS 2026-07-28). ОПЦИОНАЛЬНО: цель без
+  // него = прежний поведенческий анализ (все существующие цели работают как
+  // раньше). Имя и тип дублируем локально ОСОЗНАННО — чтобы UI не падал,
+  // когда Метрика недоступна, токен протух или цель в Метрике удалена.
+  // Конверсию НЕ храним: тянется из Метрики в рантайме (метод B +
+  // conversionRate). metrikaGoalId — String: id цели Метрики числовой и
+  // большой, храним строкой как metrikaCounterId. goalAttachedAt — момент
+  // привязки (информационно; иммутабельность после 1-го анализа гейтится
+  // наличием DONE-анализа, не этим полем).
+  metrikaGoalId     String?
+  metrikaGoalName   String?
+  metrikaGoalType   String?
+  goalAttachedAt    DateTime?
   sessionsBudget    Int
   sessionsCollected Int                  @default(0)
   status            AnalysisTargetStatus @default(ACTIVE)

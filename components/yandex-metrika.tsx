@@ -12,9 +12,13 @@
 // ⚠️ Runtime-рендер (серверный компонент), НЕ NEXT_PUBLIC_: `NEXT_PUBLIC_*`
 // впекается в бандл на сборке; здесь id читается на запросе и инлайнится.
 //
-// Сниппет — В ТОМ ВИДЕ, как его отдала Метрика для этого счётчика (не
-// «улучшаем»: визуальный пикер зависит от этой обвязки). Параметры init:
-// ssr/webvisor/clickmap/ecommerce + trackLinks (для целей по внешним ссылкам).
+// Параметры init: webvisor/clickmap/ecommerce/trackLinks.
+// ⚠️ `ssr:true` УБРАН НАМЕРЕННО — не возвращать. Он отключает авто-пейджвью с
+// клиента (доказано контролируемым A/B: с флагом — 0 обращений к
+// /watch/111140617, без него — 24), а серверных хитов приложение не шлёт.
+// Метрика подставляет `ssr:true` в сгенерированный сниппет, но это
+// предполагает SSR-интеграцию с РУЧНОЙ отправкой `ym('hit')`, которой у нас
+// нет → с флагом визиты не считались вообще.
 const YM_COUNTER_ID = process.env.YM_COUNTER_ID ?? "111140617"
 
 export function YandexMetrika() {
@@ -28,7 +32,7 @@ export function YandexMetrika() {
           `m[i].l=1*new Date();k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,` +
           `k.src=r,a.parentNode.insertBefore(k,a)})(window,document,"script",` +
           `"https://mc.yandex.ru/metrika/tag.js","ym");` +
-          `ym(${YM_COUNTER_ID}, "init", {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", trackLinks:true});`,
+          `ym(${YM_COUNTER_ID}, "init", {webvisor:true, clickmap:true, ecommerce:"dataLayer", trackLinks:true});`,
       }}
     />
   )

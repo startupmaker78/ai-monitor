@@ -29,6 +29,8 @@ export default async function DemoPage() {
   if (!demoUserId) {
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
+        {/* TEST: счётчик Метрики и в фолбэк-ветках /demo (разведка btn). */}
+        <YandexMetrika />
         <Card>
           <CardContent className="max-w-md py-12 text-center">
             <p className="text-muted-foreground">
@@ -45,6 +47,8 @@ export default async function DemoPage() {
   if (!data) {
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
+        {/* TEST: счётчик Метрики и в фолбэк-ветках /demo (разведка btn). */}
+        <YandexMetrika />
         <Card>
           <CardContent className="max-w-md py-12 text-center">
             <p className="text-muted-foreground">

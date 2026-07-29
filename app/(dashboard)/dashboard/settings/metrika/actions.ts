@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { validateSiteOwnership } from "@/lib/site-data"
+import { fetchMetrikaCounters, type CountersResult } from "@/lib/metrika-goals"
 
 const schema = z.object({
   siteId: z.string().min(1),
@@ -63,4 +64,31 @@ export async function saveMetrikaSettings(
     ok: true,
     message: "Настройки сохранены. Откройте дашборд чтобы запустить синхронизацию.",
   }
+}
+
+// Ленивая загрузка счётчиков для дропдауна. Токен: введённый в форме (если
+// передан) ИЛИ сохранённый в Site (тогда клиент токен не шлёт — читаем из БД).
+// 403/протухший токен → внятный reason (CountersResult), не пустой список.
+export async function loadMetrikaCounters(
+  siteId: string,
+  enteredToken: string,
+): Promise<CountersResult> {
+  const session = await auth()
+  if (!session?.user?.id) return { ok: false, reason: "auth_failed" }
+
+  const owns = await validateSiteOwnership(siteId, session.user.id)
+  if (!owns) return { ok: false, reason: "counter_forbidden" }
+
+  let token = enteredToken.trim()
+  if (!token) {
+    // Токен не ввели — пробуем сохранённый (для повторного выбора счётчика
+    // без повторного ввода). В клиент токен не отдаём — только используем.
+    const site = await prisma.site.findUnique({
+      where: { id: siteId },
+      select: { metrikaToken: true },
+    })
+    if (!site?.metrikaToken) return { ok: false, reason: "auth_failed" }
+    token = site.metrikaToken
+  }
+  return fetchMetrikaCounters(token)
 }

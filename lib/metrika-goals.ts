@@ -496,6 +496,61 @@ export async function fetchGoalRelevance(
   }
 }
 
+// ─── Список счётчиков токена (для дропдауна подключения Метрики) ──────────
+
+export type MetrikaCounter = {
+  id: string
+  name: string
+  domain: string // site2.domain ?? site
+  permission: string // own | edit | view | guest_see (owner_login НЕ тянем)
+  favorite: boolean
+}
+
+export type CountersResult =
+  | { ok: true; counters: MetrikaCounter[] }
+  | {
+      ok: false
+      reason: "auth_failed" | "counter_forbidden" | "rate_limited" | "metrika_unavailable"
+    }
+
+const COUNTERS_URL =
+  "https://api-metrika.yandex.net/management/v1/counters?per_page=100"
+
+// Счётчики, доступные токену. Для дропдауна вместо ручного ввода id (защита
+// от тихого выбора чужого счётчика опечаткой). owner_login НЕ включаем (чужой
+// логин Яндекса — лишние ПД в UI).
+export async function fetchMetrikaCounters(token: string): Promise<CountersResult> {
+  const r = await metrikaGet(COUNTERS_URL, token)
+  if (!r.ok) {
+    if (r.reason === "auth_failed") return { ok: false, reason: "auth_failed" }
+    if (r.reason === "counter_forbidden" || r.reason === "not_found") {
+      return { ok: false, reason: "counter_forbidden" }
+    }
+    if (r.reason === "rate_limited") return { ok: false, reason: "rate_limited" }
+    return { ok: false, reason: "metrika_unavailable" }
+  }
+  const raw = (r.json as { counters?: unknown }).counters
+  if (!Array.isArray(raw)) return { ok: false, reason: "metrika_unavailable" }
+  const counters: MetrikaCounter[] = raw.map((c) => {
+    const o = c as Record<string, unknown>
+    const site2 = o.site2 as { domain?: unknown } | undefined
+    const domain =
+      typeof site2?.domain === "string"
+        ? site2.domain
+        : typeof o.site === "string"
+          ? o.site
+          : ""
+    return {
+      id: String(o.id),
+      name: typeof o.name === "string" ? o.name : "",
+      domain,
+      permission: typeof o.permission === "string" ? o.permission : "",
+      favorite: o.favorite === 1 || o.favorite === true,
+    }
+  })
+  return { ok: true, counters }
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────
 
 function statUrl(params: Record<string, string>): string {

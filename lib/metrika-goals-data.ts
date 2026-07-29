@@ -51,13 +51,18 @@ export async function getGoalsForSite(
   const goalsRes = await fetchMetrikaGoals(site.metrikaCounterId, site.metrikaToken)
   if (!goalsRes.ok) return { ok: false, reason: goalsRes.reason }
 
-  const userIds = goalsRes.goals
-    .filter((g) => g.source === "user")
+  // Достижения тянем для user-целей + ИЗБРАННЫХ авто (они поднимаются в
+  // видимый список → нужны для сортировки и честного числа). Авто-не-избранные
+  // (свёрнутая группа) — не считаем. ⚠️ TODO: на счётчике под лимит 200 целей
+  // это до ~10 батчей (≤20 метрик/запрос) при открытии — держим в уме, при
+  // появлении таких счётчиков перейти на ленивый/параллельный подсчёт.
+  const reachIds = goalsRes.goals
+    .filter((g) => g.source === "user" || g.isFavorite)
     .map((g) => g.id)
   const reaches = await fetchGoalReaches(
     site.metrikaCounterId,
     site.metrikaToken,
-    userIds,
+    reachIds,
     REACHES_PERIOD,
   )
   const grouped = sortAndGroupGoals(goalsRes.goals, reaches)

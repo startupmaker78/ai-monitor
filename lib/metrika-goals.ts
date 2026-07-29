@@ -48,6 +48,12 @@ export type MetrikaGoal = {
   // Только для type==="url": условие цели (contain/exact/start/regexp + url).
   // Нужно для детерминированной оценки релевантности странице (0 вызовов).
   urlCondition?: { type: string; url: string }
+  // Клиент отметил цель ключевой в Метрике (`is_favorite`=1). Сильнее любой
+  // нашей эвристики релевантности → первый ярус сортировки.
+  isFavorite: boolean
+  // Метки цели (группировка в Метрике). Протянуто на будущее, пока не
+  // используется. Форма элемента неизвестна (у academy labels пусты).
+  labels?: unknown[]
 }
 
 // Релевантность цели странице (вариант C, 3 вызова, ОБЕ меры — viewed).
@@ -178,6 +184,8 @@ export async function fetchMetrikaGoals(
       type,
       source: o.goal_source === "user" ? "user" : "auto",
       urlCondition,
+      isFavorite: o.is_favorite === 1 || o.is_favorite === true,
+      labels: Array.isArray(o.labels) ? o.labels : undefined,
     }
   })
   return { ok: true, goals }

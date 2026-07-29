@@ -102,15 +102,30 @@ function goalWarning(goal: GoalWithReaches, pageUrl?: string): string | null {
   return null
 }
 
-// Сортировка пользовательских целей в 2 яруса: сверху релевантные (без
-// бейджа) по достижениям, снизу демотированные (любой сигнал goalWarning) по
-// достижениям — так демотированные с трафиком стоят выше мёртвых (0). 0
-// вызовов, из загруженного списка.
+// Ярус цели для сортировки:
+//   0 — избранные ЖИВЫЕ (клиент отметил ключевой в Метрике — сильнее нашей
+//       эвристики релевантности);
+//   1 — обычные не-демотированные;
+//   2 — демотированные нашими сигналами релевантности (duration/url-mismatch/
+//       footer);
+//   3 — МЁРТВЫЕ (reaches=0), включая избранные.
+// Правило: звезда бьёт эвристики, но НЕ бьёт ноль — 0 достижений за период
+// это факт (конверсия вернёт no_data), а не догадка. Мёртвая избранная всё
+// равно сохраняет звезду и бейдж «не срабатывала» (честно объясняет, почему
+// внизу). Внутри яруса — по достижениям.
+function goalTier(g: GoalWithReaches, pageUrl?: string): number {
+  if (g.reaches === 0) return 3
+  if (g.isFavorite) return 0
+  // reaches>0 здесь → goalWarning вернёт только не-dead сигналы.
+  return goalWarning(g, pageUrl) ? 2 : 1
+}
+
+// Сортировка пользовательских целей по ярусам (0 вызовов, из списка).
 function byRelevance(pageUrl?: string) {
   return (a: GoalWithReaches, b: GoalWithReaches): number => {
-    const da = goalWarning(a, pageUrl) ? 1 : 0
-    const db = goalWarning(b, pageUrl) ? 1 : 0
-    if (da !== db) return da - db
+    const ta = goalTier(a, pageUrl)
+    const tb = goalTier(b, pageUrl)
+    if (ta !== tb) return ta - tb
     return b.reaches - a.reaches
   }
 }
@@ -272,17 +287,21 @@ export function GoalSelect({
                 В счётчике нет пользовательских целей.
               </div>
             )}
-            {[...data.user].sort(byRelevance(pageUrl)).map((g) => (
-              <GoalRow
-                key={g.id}
-                goal={g}
-                selected={g.id === currentGoalId}
-                pageUrl={pageUrl}
-                onPick={pick}
-              />
-            ))}
+            {/* Видимый список = пользовательские + ИЗБРАННЫЕ авто-цели (клиент
+                отметил ключевыми — не прячем в свёрнутой группе). */}
+            {[...data.user, ...data.auto.filter((g) => g.isFavorite)]
+              .sort(byRelevance(pageUrl))
+              .map((g) => (
+                <GoalRow
+                  key={g.id}
+                  goal={g}
+                  selected={g.id === currentGoalId}
+                  pageUrl={pageUrl}
+                  onPick={pick}
+                />
+              ))}
 
-            {data.auto.length > 0 && (
+            {data.auto.filter((g) => !g.isFavorite).length > 0 && (
               <>
                 <DropdownMenuSeparator />
                 {!showAuto ? (
@@ -293,7 +312,8 @@ export function GoalSelect({
                     }}
                     className="text-sm text-muted-foreground"
                   >
-                    ▸ Автоцели Метрики ({data.auto.length}) — показать
+                    ▸ Автоцели Метрики (
+                    {data.auto.filter((g) => !g.isFavorite).length}) — показать
                   </DropdownMenuItem>
                 ) : (
                   <>
@@ -301,14 +321,17 @@ export function GoalSelect({
                       Автоцели — Метрика создала их сама (соцсети, телефон,
                       формы)
                     </DropdownMenuLabel>
-                    {data.auto.map((g) => (
-                      <GoalRow
-                        key={g.id}
-                        goal={g}
-                        selected={g.id === currentGoalId}
-                        onPick={pick}
-                      />
-                    ))}
+                    {data.auto
+                      .filter((g) => !g.isFavorite)
+                      .map((g) => (
+                        <GoalRow
+                          key={g.id}
+                          goal={g}
+                          selected={g.id === currentGoalId}
+                          pageUrl={pageUrl}
+                          onPick={pick}
+                        />
+                      ))}
                   </>
                 )}
               </>
@@ -373,6 +396,11 @@ function GoalRow({
           <span className="block text-xs text-muted-foreground">
             {typeLabel(goal.type)}
           </span>
+          {goal.isFavorite && (
+            <span className="mt-0.5 block text-xs font-medium text-amber-700">
+              ★ ключевая цель — отмечена в Метрике
+            </span>
+          )}
           {warning && (
             <span className="mt-0.5 block text-xs leading-snug text-muted-foreground/80">
               ⓘ {warning}

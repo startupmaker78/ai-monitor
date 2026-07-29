@@ -10,6 +10,7 @@ import { UsageWidget } from "@/components/dashboard/usage-widget"
 import { TargetsList } from "@/components/dashboard/targets-list"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { YandexMetrika } from "@/components/yandex-metrika"
 
 export const metadata = {
   title: "Демо — Вебмонитор",
@@ -57,6 +58,8 @@ export default async function DemoPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* TEST: счётчик Метрики на публичном /demo (разведка btn-целей). */}
+      <YandexMetrika />
       <div className="border-b bg-primary text-primary-foreground">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-3 px-4 py-3 sm:flex-row sm:items-center">
           <div className="flex items-center gap-2">

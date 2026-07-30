@@ -5,6 +5,7 @@ import {
   loadTargetsWithRecommendations,
 } from "@/lib/recommendations-data"
 import { getGoalConversionForTarget } from "@/lib/goal-conversion-data"
+import { getSelectedSiteId } from "@/lib/selected-site"
 import { Card, CardContent } from "@/components/ui/card"
 import { TargetSelector } from "./target-selector"
 import { RecommendationsClient } from "./recommendations-client"
@@ -12,14 +13,16 @@ import { ConversionBlock } from "./conversion-block"
 
 export const metadata = { title: "Рекомендации — Вебмонитор" }
 
-type PageProps = { searchParams: { targetId?: string } }
+type PageProps = { searchParams: { targetId?: string; site?: string } }
 
 export default async function RecommendationsPage({ searchParams }: PageProps) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
   const userId = session.user.id
 
-  const targets = await loadTargetsWithRecommendations(userId)
+  // Список целей доскоплен до выбранного сайта (глобальный селектор).
+  const siteId = await getSelectedSiteId(userId, searchParams.site)
+  const targets = await loadTargetsWithRecommendations(userId, siteId ?? undefined)
 
   if (targets.length === 0) {
     return (

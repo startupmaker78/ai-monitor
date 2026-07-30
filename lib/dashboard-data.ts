@@ -5,7 +5,7 @@ import {
   type SessionClass,
 } from "@/lib/session-classification"
 
-export async function getDashboardData(userId: string) {
+export async function getDashboardData(userId: string, selectedSiteId?: string) {
   const ownerProfile = await prisma.ownerProfile.findUnique({
     where: { userId },
     include: {
@@ -14,7 +14,6 @@ export async function getDashboardData(userId: string) {
         // быть, но если что-то осталось — не показываем на дашборде.
         where: { isDemo: false },
         orderBy: { createdAt: "asc" },
-        take: 1,
       },
     },
   })
@@ -23,7 +22,12 @@ export async function getDashboardData(userId: string) {
     return null
   }
 
-  const site = ownerProfile.sites[0]
+  // Выбранный сайт (глобальный селектор, cookie). selectedSiteId уже
+  // валидирован в getSelectedSiteId, но перепроверяем принадлежность здесь —
+  // не доверяем; невалидный → первый сайт.
+  const site =
+    ownerProfile.sites.find((s) => s.id === selectedSiteId) ??
+    ownerProfile.sites[0]
 
   const sevenDaysAgo = new Date()
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7)
@@ -38,12 +42,11 @@ export async function getDashboardData(userId: string) {
   })
 
   const totalVisits7d = recentSnapshots.reduce((sum, s) => sum + s.visits, 0)
-  const totalConversions7d = recentSnapshots.reduce(
-    (sum, s) => sum + s.conversions,
-    0,
-  )
-  const avgConversionRate =
-    totalVisits7d > 0 ? (totalConversions7d / totalVisits7d) * 100 : 0
+  // KPI «Конверсия» УБРАН с дашборда (DECISIONS/TODO 2026-07-30):
+  // MetricsSnapshot.conversions пишется нулём заглушкой синка → всегда 0.0%,
+  // и это второе число «конверсия» рядом с честной конверсией цели (Path M)
+  // противоречило бы единому знаменателю. avgConversionRate/totalConversions7d
+  // удалены.
   const avgDuration =
     recentSnapshots.length > 0
       ? Math.round(
@@ -210,7 +213,6 @@ export async function getDashboardData(userId: string) {
     hasMetrics: allSnapshots.length > 0,
     kpi: {
       totalVisits7d,
-      avgConversionRate,
       avgDuration,
       totalActive,
     },

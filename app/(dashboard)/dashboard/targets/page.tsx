@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { getTargetsPageData } from "@/lib/targets-data"
+import { getSelectedSiteId } from "@/lib/selected-site"
 import { getMinSessionsBudget } from "@/lib/config"
 import { TargetsClient } from "./targets-client"
-import { SiteSelector } from "../settings/metrika/site-selector"
 
 export const metadata = { title: "Цели анализа — Вебмонитор" }
 
@@ -15,7 +15,8 @@ export default async function TargetsPage({ searchParams }: PageProps) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const data = await getTargetsPageData(session.user.id, searchParams.site)
+  const siteId = await getSelectedSiteId(session.user.id, searchParams.site)
+  const data = await getTargetsPageData(session.user.id, siteId ?? undefined)
 
   if (data.sites.length === 0 || !data.selectedSite) {
     return (
@@ -39,12 +40,6 @@ export default async function TargetsPage({ searchParams }: PageProps) {
         <h2 className="text-2xl font-semibold tracking-tight">
           Цели анализа
         </h2>
-        {data.sites.length > 1 && (
-          <SiteSelector
-            sites={data.sites}
-            selectedSiteId={data.selectedSite.id}
-          />
-        )}
       </div>
 
       <TargetsClient

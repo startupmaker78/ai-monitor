@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { getSessionsForUser } from "@/lib/sessions-data"
+import { getSelectedSiteId } from "@/lib/selected-site"
 import { SessionsTable } from "./sessions-table"
-import { SiteFilter } from "./site-filter"
 import { TargetFilter } from "./target-filter"
 
 export const metadata = {
@@ -20,8 +20,11 @@ export default async function SessionsPage({ searchParams }: PageProps) {
   const sort: "newest" | "oldest" =
     searchParams.sort === "oldest" ? "oldest" : "newest"
 
+  // Сайт из глобального селектора (cookie) + опциональный ?site= override.
+  const siteId = await getSelectedSiteId(session.user.id, searchParams.site)
+
   const data = await getSessionsForUser(session.user.id, {
-    siteId: searchParams.site,
+    siteId: siteId ?? undefined,
     targetId: searchParams.targetId,
     sort,
   })
@@ -35,13 +38,6 @@ export default async function SessionsPage({ searchParams }: PageProps) {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-2xl font-semibold tracking-tight">Сессии</h2>
         <div className="flex flex-wrap items-center gap-2">
-          {data.sites.length > 1 && (
-            <SiteFilter
-              sites={data.sites}
-              selectedSiteId={data.selectedSiteId}
-              currentSort={sort}
-            />
-          )}
           <TargetFilter
             targets={data.targets}
             selectedTargetId={data.selectedTargetId}

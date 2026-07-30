@@ -13,6 +13,7 @@ export type TargetWithRecs = {
 // Ownership через User → OwnerProfile → Site.
 export async function loadTargetsWithRecommendations(
   userId: string,
+  siteId?: string,
 ): Promise<TargetWithRecs[]> {
   const op = await prisma.ownerProfile.findUnique({
     where: { userId },
@@ -22,7 +23,12 @@ export async function loadTargetsWithRecommendations(
 
   const raw = await prisma.analysisTarget.findMany({
     where: {
+      // Доскопить до выбранного сайта (глобальный селектор) — иначе на двух
+      // сайтах список рекомендаций был бы солянкой из целей всех сайтов.
+      // ownerId остаётся гейтом принадлежности (siteId уже валидирован, но
+      // не доверяем — цель всё равно должна быть у этого владельца).
       site: { ownerId: op.id },
+      ...(siteId ? { siteId } : {}),
       analyses: {
         some: {
           status: "DONE",

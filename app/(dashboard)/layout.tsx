@@ -29,6 +29,8 @@ import { LogOut, ChevronUp } from "lucide-react"
 import { logout } from "@/app/(auth)/logout/actions"
 import { SidebarNav } from "./sidebar-nav"
 import { HeaderTitle } from "./header-title"
+import { SiteSwitcher } from "./site-switcher"
+import { getUserSitesAndSelected } from "@/lib/selected-site"
 
 export default async function DashboardLayout({
   children,
@@ -37,6 +39,9 @@ export default async function DashboardLayout({
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
+
+  // Глобальный выбор сайта (cookie) — один селектор в хедере на все вкладки.
+  const { sites, selectedId } = await getUserSitesAndSelected(session.user.id)
 
   const userName = session.user.name ?? "Пользователь"
   const userEmail = session.user.email ?? ""
@@ -114,6 +119,7 @@ export default async function DashboardLayout({
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="h-4" />
           <HeaderTitle />
+          <SiteSwitcher sites={sites} selectedId={selectedId} />
         </header>
         <main className="flex-1 p-4 md:p-6">{children}</main>
       </SidebarInset>

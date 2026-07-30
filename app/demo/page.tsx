@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Clock, Eye, Lightbulb, Sparkles, TrendingUp } from "lucide-react"
+import { Clock, Eye, Lightbulb, Sparkles } from "lucide-react"
 import { getDashboardData } from "@/lib/dashboard-data"
 import { DEMO_TIER } from "@/lib/demo-tier-info"
 import { KpiCard } from "@/components/dashboard/kpi-card"
@@ -104,18 +104,12 @@ export default async function DemoPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <KpiCard
             title="Визиты за 7 дней"
             value={data.kpi.totalVisits7d.toLocaleString("ru-RU")}
             description="Уникальные посещения"
             icon={Eye}
-          />
-          <KpiCard
-            title="Конверсия"
-            value={`${data.kpi.avgConversionRate.toFixed(1)}%`}
-            description="Средняя за неделю"
-            icon={TrendingUp}
           />
           <KpiCard
             title="Среднее время"

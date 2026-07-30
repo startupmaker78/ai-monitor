@@ -1,8 +1,9 @@
 import Link from "next/link"
-import { Clock, Eye, Lightbulb, TrendingUp } from "lucide-react"
+import { Clock, Eye, Lightbulb } from "lucide-react"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { getDashboardData } from "@/lib/dashboard-data"
+import { getSelectedSiteId } from "@/lib/selected-site"
 import { DEMO_TIER } from "@/lib/demo-tier-info"
 import { KpiCard } from "@/components/dashboard/kpi-card"
 import { VisitsChart } from "@/components/dashboard/visits-chart"
@@ -24,11 +25,17 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: { site?: string }
+}) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const data = await getDashboardData(session.user.id)
+  // Глобальный выбор сайта (cookie) + опциональный ?site= override.
+  const siteId = await getSelectedSiteId(session.user.id, searchParams.site)
+  const data = await getDashboardData(session.user.id, siteId ?? undefined)
 
   // 0 real sites — после сlean-up demo и моего фильтра isDemo=false в
   // dashboard-data getDashboardData возвращает null когда Sites нет.
@@ -112,18 +119,12 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <KpiCard
           title="Визиты за 7 дней"
           value={data.kpi.totalVisits7d.toLocaleString("ru-RU")}
           description="Уникальные посещения"
           icon={Eye}
-        />
-        <KpiCard
-          title="Конверсия"
-          value={`${data.kpi.avgConversionRate.toFixed(1)}%`}
-          description="Средняя за неделю"
-          icon={TrendingUp}
         />
         <KpiCard
           title="Среднее время"

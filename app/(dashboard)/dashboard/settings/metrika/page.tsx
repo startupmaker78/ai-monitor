@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { getOwnerSitesByUserId } from "@/lib/site-data"
+import { getSelectedSiteId } from "@/lib/selected-site"
 import { MetrikaForm } from "./metrika-form"
-import { SiteSelector } from "./site-selector"
 
 export const metadata = {
   title: "Яндекс.Метрика — Вебмонитор",
@@ -34,10 +34,9 @@ export default async function MetrikaSettingsPage({ searchParams }: PageProps) {
     )
   }
 
-  // Validate siteId из URL: если не передан или чужой — find возвращает
-  // undefined и фолбэк на первый сайт (sites.length > 0 проверено выше).
-  const selectedSite =
-    sites.find((s) => s.id === searchParams.site) ?? sites[0]
+  // Сайт из глобального селектора (cookie) — локальный переключатель убран.
+  const selectedId = await getSelectedSiteId(session.user.id, searchParams.site)
+  const selectedSite = sites.find((s) => s.id === selectedId) ?? sites[0]
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -45,9 +44,6 @@ export default async function MetrikaSettingsPage({ searchParams }: PageProps) {
         <h2 className="text-2xl font-semibold tracking-tight">
           Яндекс.Метрика
         </h2>
-        {sites.length > 1 && (
-          <SiteSelector sites={sites} selectedSiteId={selectedSite.id} />
-        )}
       </div>
 
       <MetrikaForm

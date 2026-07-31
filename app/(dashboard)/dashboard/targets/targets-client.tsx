@@ -4,7 +4,8 @@ import { useFormState, useFormStatus } from "react-dom"
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { CheckCircle2, Loader2, Lock } from "lucide-react"
+import { CheckCircle2, Loader2, Lock, HelpCircle } from "lucide-react"
+import { guideHref } from "@/lib/guide-anchors"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -197,6 +198,17 @@ export function TargetsClient(props: Props) {
                   </Link>
                   . Без неё цель анализируется по поведению.
                 </p>
+              )}
+              {!props.metrikaConfigured && (
+                <Link
+                  href={guideHref("token")}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+                  Как подключить и получить токен — гайд
+                </Link>
               )}
               <p className="text-xs text-muted-foreground">
                 Метрика посчитает, какой процент посетителей доходит до этого
@@ -479,7 +491,15 @@ function TargetCard({
               >
                 Подключите Метрику
               </Link>
-              , чтобы задать
+              , чтобы задать ·{" "}
+              <Link
+                href={guideHref("token")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2"
+              >
+                как?
+              </Link>
             </span>
           )}
           {goalError && (

@@ -1,7 +1,10 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
+import { HelpCircle } from "lucide-react"
 import { auth } from "@/auth"
 import { getOwnerSitesByUserId } from "@/lib/site-data"
 import { getSelectedSiteId } from "@/lib/selected-site"
+import { guideHref } from "@/lib/guide-anchors"
 import { MetrikaForm } from "./metrika-form"
 
 export const metadata = {
@@ -40,10 +43,19 @@ export default async function MetrikaSettingsPage({ searchParams }: PageProps) {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-2xl font-semibold tracking-tight">
           Яндекс.Метрика
         </h2>
+        <Link
+          href={guideHref("token")}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <HelpCircle className="h-4 w-4 shrink-0" />
+          Как получить токен — гайд
+        </Link>
       </div>
 
       <MetrikaForm

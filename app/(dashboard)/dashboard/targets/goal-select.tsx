@@ -1,8 +1,15 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Loader2, ChevronDown, Check, Target as TargetIcon } from "lucide-react"
+import {
+  Loader2,
+  ChevronDown,
+  Check,
+  Target as TargetIcon,
+  HelpCircle,
+} from "lucide-react"
 import Link from "next/link"
+import { guideHref } from "@/lib/guide-anchors"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -348,6 +355,21 @@ export function GoalSelect({
             )}
           </>
         )}
+        {/* Нейтральная help-ссылка (не бейдж-предупреждение): подвал меню, не
+            DropdownMenuItem — Radix onSelect к ней не применяется, меню не
+            закрывается, гайд открывается в новой вкладке (состояние выбора не
+            теряется). Якорь на раздел про типы целей. */}
+        <div className="sticky bottom-0 border-t bg-popover px-2 py-2">
+          <Link
+            href={guideHref("types")}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+            Какую цель выбрать? Открыть гайд
+          </Link>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
       {/* Релевантность выбранной action-цели (вариант C: обе меры viewed,

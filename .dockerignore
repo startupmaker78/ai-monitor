@@ -13,7 +13,11 @@ DECISIONS.md
 .vscode
 .idea
 *.log
-docs/
+# docs/ впускаем НЕ целиком: docs/metrika-goals-guide.md нужен билду (webpack
+# импортит его строкой + prebuild anchor-check). Исключаем только внутренние
+# setup-доки. Финальный образ docs/ всё равно не копирует (builder discarded).
+docs/DEPLOY_SETUP.md
+docs/SHADOW_DB_SETUP.md
 __tests__/
 coverage/
 prisma/migrations/migration_lock.toml

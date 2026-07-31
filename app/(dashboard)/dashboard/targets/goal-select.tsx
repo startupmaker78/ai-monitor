@@ -134,14 +134,24 @@ function byRelevance(pageUrl?: string) {
 const GOAL_TYPE_LABELS: Record<string, string> = {
   action: "клик/событие",
   url: "посещение URL",
+  button: "клик по кнопке",
   phone: "звонок",
   email: "email",
   file: "файл",
   social: "соцсети",
   messenger: "мессенджер",
   form: "форма",
+  search: "поиск по сайту",
+  contact_data: "контактные данные",
+  payment_system: "платёжная система",
+  e_purchase: "покупка",
+  e_cart: "добавление в корзину",
+  step: "составная цель",
   visit_duration: "время на сайте",
   number: "глубина",
+  // «Параметры» и «Мультицель» из UI Метрики — их API-строку `type` дампом НЕ
+  // подтвердили; добавить, когда увидим реальное значение. До тех пор typeLabel
+  // безопасно покажет сырое значение (не падает).
 }
 
 function typeLabel(t: string): string {

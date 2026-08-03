@@ -28,9 +28,13 @@ const STATUS_BADGES: Record<
 
 interface TargetsListProps {
   targets: AnalysisTarget[]
+  // Цели, готовые к анализу (collected>=минимум, ещё не проанализированы).
+  // Модель B: запуск возможен не дожидаясь бюджета — подсвечиваем + CTA.
+  readyTargetIds?: string[]
 }
 
-export function TargetsList({ targets }: TargetsListProps) {
+export function TargetsList({ targets, readyTargetIds = [] }: TargetsListProps) {
+  const readySet = new Set(readyTargetIds)
   if (targets.length === 0) {
     return (
       <Card>
@@ -70,6 +74,7 @@ export function TargetsList({ targets }: TargetsListProps) {
       </CardHeader>
       <CardContent className="space-y-4">
         {targets.map((target) => {
+          const isReady = readySet.has(target.id)
           const status = STATUS_BADGES[target.status] ?? STATUS_BADGES.ACTIVE
           const percent =
             target.sessionsBudget > 0
@@ -90,10 +95,17 @@ export function TargetsList({ targets }: TargetsListProps) {
                     </span>
                   </div>
                 </div>
-                <Badge variant={status.variant} className="shrink-0">
-                  {StatusIcon && <StatusIcon className="mr-1 h-3 w-3" />}
-                  {status.label}
-                </Badge>
+                {isReady ? (
+                  <Badge className="shrink-0 border-amber-300 bg-amber-100 text-amber-800">
+                    <PlayCircle className="mr-1 h-3 w-3" />
+                    Можно запускать
+                  </Badge>
+                ) : (
+                  <Badge variant={status.variant} className="shrink-0">
+                    {StatusIcon && <StatusIcon className="mr-1 h-3 w-3" />}
+                    {status.label}
+                  </Badge>
+                )}
               </div>
 
               <div className="flex items-center gap-3">
@@ -108,6 +120,19 @@ export function TargetsList({ targets }: TargetsListProps) {
                   {target.sessionsBudget.toLocaleString("ru-RU")}
                 </span>
               </div>
+
+              {isReady && (
+                <p className="text-xs text-muted-foreground">
+                  Набрано достаточно сессий —{" "}
+                  <Link
+                    href="/dashboard/recommendations"
+                    className="font-medium text-amber-700 underline underline-offset-2"
+                  >
+                    запустить анализ
+                  </Link>{" "}
+                  можно не дожидаясь полного сбора.
+                </p>
+              )}
             </div>
           )
         })}

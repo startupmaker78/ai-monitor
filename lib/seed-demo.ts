@@ -310,14 +310,19 @@ export async function seedDemoSite({ siteId, userId }: SeedDemoSiteOptions) {
     }
     await tx.metricsSnapshot.createMany({ data: snapshots })
 
+    // Реалистичные бюджеты как у настоящего клиента на Тильде (~30, не 1000):
+    // демо не должно рисовать сервис для большого трафика. Разные стадии +
+    // одна цель ГОТОВА К АНАЛИЗУ (8/30 ACTIVE, ещё не анализировалась) —
+    // показывает третью ветку онбординга и подсветку «Можно запускать»
+    // (Модель B: запуск при collected>=5, о чём клиент сам не догадается).
     const targets = await Promise.all([
       tx.analysisTarget.create({
         data: {
           siteId,
           url: "/",
           name: "Главная страница",
-          sessionsBudget: 1000,
-          sessionsCollected: 987,
+          sessionsBudget: 30,
+          sessionsCollected: 30,
           status: "COMPLETED",
         },
       }),
@@ -326,8 +331,8 @@ export async function seedDemoSite({ siteId, userId }: SeedDemoSiteOptions) {
           siteId,
           url: "/pricing",
           name: "Страница тарифов",
-          sessionsBudget: 600,
-          sessionsCollected: 523,
+          sessionsBudget: 30,
+          sessionsCollected: 30,
           status: "COMPLETED",
         },
       }),
@@ -336,8 +341,8 @@ export async function seedDemoSite({ siteId, userId }: SeedDemoSiteOptions) {
           siteId,
           url: "/about",
           name: "О компании",
-          sessionsBudget: 400,
-          sessionsCollected: 312,
+          sessionsBudget: 30,
+          sessionsCollected: 28,
           status: "COMPLETED",
         },
       }),
@@ -346,15 +351,15 @@ export async function seedDemoSite({ siteId, userId }: SeedDemoSiteOptions) {
           siteId,
           url: "/blog",
           name: "Блог",
-          sessionsBudget: 500,
-          sessionsCollected: 71,
+          sessionsBudget: 30,
+          sessionsCollected: 8,
           status: "ACTIVE",
         },
       }),
     ])
 
     // Analysis создаём только для COMPLETED targets (первые 3).
-    // /blog в ACTIVE — копит сессии, ещё не анализировался.
+    // /blog в ACTIVE 8/30 — готов к анализу (>=5), ещё не анализировался.
     const completedTargets = targets.slice(0, 3)
     const analyses = await Promise.all(
       completedTargets.map((target, idx) =>

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma"
 import { DEMO_TIER, calculateDemoUsage } from "@/lib/demo-tier-info"
+import { getMinSessionsBudget } from "@/lib/config"
 import {
   classifySession,
   type SessionClass,
@@ -29,41 +30,10 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
     ownerProfile.sites.find((s) => s.id === selectedSiteId) ??
     ownerProfile.sites[0]
 
-  const sevenDaysAgo = new Date()
-  sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7)
-  sevenDaysAgo.setUTCHours(0, 0, 0, 0)
-
-  const recentSnapshots = await prisma.metricsSnapshot.findMany({
-    where: {
-      siteId: site.id,
-      date: { gte: sevenDaysAgo },
-    },
-    orderBy: { date: "asc" },
-  })
-
-  const totalVisits7d = recentSnapshots.reduce((sum, s) => sum + s.visits, 0)
-  // KPI «Конверсия» УБРАН с дашборда (DECISIONS/TODO 2026-07-30):
-  // MetricsSnapshot.conversions пишется нулём заглушкой синка → всегда 0.0%,
-  // и это второе число «конверсия» рядом с честной конверсией цели (Path M)
-  // противоречило бы единому знаменателю. avgConversionRate/totalConversions7d
-  // удалены.
-  const avgDuration =
-    recentSnapshots.length > 0
-      ? Math.round(
-          recentSnapshots.reduce((sum, s) => sum + s.avgSessionDuration, 0) /
-            recentSnapshots.length,
-        )
-      : 0
-
-  const allSnapshots = await prisma.metricsSnapshot.findMany({
-    where: { siteId: site.id },
-    orderBy: { date: "asc" },
-    select: {
-      date: true,
-      visits: true,
-      conversions: true,
-    },
-  })
+  // Дашборд теперь показывает МЕТРИКИ ПРОДУКТА (записали → отследили →
+  // проанализировали → нашли), а не визиты/время из Метрики (клиент видел бы
+  // копию Метрики). Метрика осталась для блока конверсии по цели (Path M) и
+  // синка — но на главную визиты/время больше не выносим.
 
   // NB: список `recommendations` (ниже) на РЕАЛЬНОМ дашборде больше не
   // показывается (блок «Топ-10» убран — врал: ≠10 и смешивал рекомендации
@@ -205,26 +175,111 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
 
   const usage = calculateDemoUsage(targets, analysesThisMonth)
 
+  // ── Продуктовые KPI (только DB, скоуп siteId). Окно графика — 30 дней.
+  const chartStart = new Date()
+  chartStart.setUTCDate(chartStart.getUTCDate() - 29)
+  chartStart.setUTCHours(0, 0, 0, 0)
+
+  const [
+    sessionsRecorded,
+    targetsTotal,
+    analysesTotal,
+    recommendationsReceived,
+    recPriorityRaw,
+    sessionRows,
+    analysisRows,
+    analyzedRows,
+  ] = await Promise.all([
+    prisma.session.count({ where: { siteId: site.id } }),
+    prisma.analysisTarget.count({ where: { siteId: site.id } }),
+    prisma.analysis.count({ where: { siteId: site.id } }),
+    prisma.recommendation.count({ where: { analysis: { siteId: site.id } } }),
+    prisma.recommendation.groupBy({
+      by: ["priority"],
+      where: { analysis: { siteId: site.id } },
+      _count: true,
+    }),
+    prisma.session.findMany({
+      where: { siteId: site.id, startedAt: { gte: chartStart } },
+      select: { startedAt: true },
+    }),
+    prisma.analysis.findMany({
+      where: { siteId: site.id, createdAt: { gte: chartStart } },
+      select: { createdAt: true },
+    }),
+    // Какие цели УЖЕ анализировались (distinct targetId) — по факту анализов,
+    // а не по target.status (он ненадёжен: у academy цели ACTIVE, хотя
+    // проанализированы). Для честного «готова к анализу».
+    prisma.analysis.findMany({
+      where: { siteId: site.id },
+      select: { targetId: true },
+      distinct: ["targetId"],
+    }),
+  ])
+  const analyzedTargetIds = new Set(analyzedRows.map((a) => a.targetId))
+
+  const recReceivedByPriority = {
+    CRITICAL: recPriorityRaw.find((p) => p.priority === "CRITICAL")?._count ?? 0,
+    IMPORTANT:
+      recPriorityRaw.find((p) => p.priority === "IMPORTANT")?._count ?? 0,
+    GOOD: recPriorityRaw.find((p) => p.priority === "GOOD")?._count ?? 0,
+  }
+
+  // Непрерывный ряд из 30 дней (пропуски заполняем нулями) для графика.
+  const dayKey = (d: Date) => d.toISOString().slice(0, 10)
+  const sessionsByDay = new Map<string, number>()
+  for (const s of sessionRows) {
+    const k = dayKey(s.startedAt)
+    sessionsByDay.set(k, (sessionsByDay.get(k) ?? 0) + 1)
+  }
+  const analysesByDay = new Map<string, number>()
+  for (const a of analysisRows) {
+    const k = dayKey(a.createdAt)
+    analysesByDay.set(k, (analysesByDay.get(k) ?? 0) + 1)
+  }
+  const sessionsChart: { date: string; sessions: number; analyses: number }[] =
+    []
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(chartStart)
+    d.setUTCDate(chartStart.getUTCDate() + i)
+    const k = dayKey(d)
+    sessionsChart.push({
+      date: k,
+      sessions: sessionsByDay.get(k) ?? 0,
+      analyses: analysesByDay.get(k) ?? 0, // счётчик анализов дня → точка-маркер
+    })
+  }
+
+  // Готовые к анализу: цель с collected>=минимум, по которой ЕЩЁ НЕ было
+  // анализа. Модель B разрешает запуск не дожидаясь бюджета — клиент об этом
+  // не знает и ждёт зря. (Уже проанализированные не подсвечиваем как «можно
+  // запускать» — иначе врали бы про academy, где цели проанализированы.)
+  const minSessions = getMinSessionsBudget()
+  const readyTargets = targets.filter(
+    (t) => t.sessionsCollected >= minSessions && !analyzedTargetIds.has(t.id),
+  )
+
   return {
     site,
-    // hasMetrics=false → показываем «Ждём первых данных». Сигнал ЧЕСТНЫЙ:
-    // хоть один снапшот с visits>0, а НЕ просто наличие снапшотов. У свежего
-    // счётчика синк создаёт ~30 НУЛЕВЫХ снапшотов → allSnapshots.length>0 был
-    // true при нуле данных, и новый клиент видел дашборд с нулями вместо
-    // «данные ещё идут». visits>0 — тот же сигнал, что в виджете статуса
-    // (lib/connection-status.ts syncHasData). Считаем из уже загруженного
-    // allSnapshots — без второго запроса.
-    hasMetrics: allSnapshots.some((s) => s.visits > 0),
+    // Продуктовые KPI (воронка: записали → отследили → проанализировали →
+    // нашли). Метрику Метрики (визиты/время) на главную не выносим.
     kpi: {
-      totalVisits7d,
-      avgDuration,
-      totalActive,
+      sessionsRecorded,
+      targetsActive: targets.length, // targets = archivedAt:null
+      targetsTotal,
+      analysesThisMonth,
+      analysesLimit: DEMO_TIER.analysesPerMonth,
+      recommendationsReceived,
+      totalActive, // активные (NEW/IN_PROGRESS) — для ссылки на рекомендации
     },
-    chart: allSnapshots.map((s) => ({
-      date: s.date.toISOString().split("T")[0],
-      visits: s.visits,
-      conversions: s.conversions,
-    })),
+    recPriorityReceived: recReceivedByPriority,
+    readyToAnalyze: {
+      count: readyTargets.length,
+      firstName: readyTargets[0]?.name ?? readyTargets[0]?.url ?? null,
+    },
+    readyTargetIds: readyTargets.map((t) => t.id),
+    analysesTotal,
+    sessionsChart,
     recommendations: topRecommendations.slice(0, 10),
     priorityCounts: counts,
     targets,

@@ -1,9 +1,9 @@
 import Link from "next/link"
-import { Clock, Eye, Lightbulb, Sparkles } from "lucide-react"
+import { PlaySquare, Target, Sparkles, Lightbulb } from "lucide-react"
 import { getDashboardData } from "@/lib/dashboard-data"
 import { DEMO_TIER } from "@/lib/demo-tier-info"
 import { KpiCard } from "@/components/dashboard/kpi-card"
-import { VisitsChart } from "@/components/dashboard/visits-chart"
+import { SessionsChart } from "@/components/dashboard/sessions-chart"
 import { RecommendationCard } from "@/components/dashboard/recommendation-card"
 import { TierBadge } from "@/components/dashboard/tier-badge"
 import { UsageWidget } from "@/components/dashboard/usage-widget"
@@ -17,12 +17,6 @@ export const metadata = {
 }
 
 export const dynamic = "force-dynamic"
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${String(s).padStart(2, "0")}`
-}
 
 export default async function DemoPage() {
   const demoUserId = process.env.DEMO_USER_ID
@@ -104,23 +98,33 @@ export default async function DemoPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <KpiCard
-            title="Визиты за 7 дней"
-            value={data.kpi.totalVisits7d.toLocaleString("ru-RU")}
-            description="Уникальные посещения"
-            icon={Eye}
+            title="Сессий записано"
+            value={data.kpi.sessionsRecorded.toLocaleString("ru-RU")}
+            description="Всего по сайту"
+            icon={PlaySquare}
           />
           <KpiCard
-            title="Среднее время"
-            value={formatDuration(data.kpi.avgDuration)}
-            description="На сайте, мин:сек"
-            icon={Clock}
+            title="Целей"
+            value={data.kpi.targetsActive.toString()}
+            description={
+              data.kpi.targetsTotal > data.kpi.targetsActive
+                ? `активных · ${data.kpi.targetsTotal} всего`
+                : "активных"
+            }
+            icon={Target}
           />
           <KpiCard
-            title="Активные рекомендации"
-            value={data.kpi.totalActive.toString()}
-            description={`🔴 ${data.priorityCounts.CRITICAL} · 🟡 ${data.priorityCounts.IMPORTANT} · 🟢 ${data.priorityCounts.GOOD}`}
+            title="Анализов в этом месяце"
+            value={`${data.kpi.analysesThisMonth} из ${data.kpi.analysesLimit}`}
+            description="Расход и лимит тарифа"
+            icon={Sparkles}
+          />
+          <KpiCard
+            title="Рекомендаций получено"
+            value={data.kpi.recommendationsReceived.toString()}
+            description={`🔴 ${data.recPriorityReceived.CRITICAL} · 🟡 ${data.recPriorityReceived.IMPORTANT} · 🟢 ${data.recPriorityReceived.GOOD}`}
             icon={Lightbulb}
           />
         </div>
@@ -135,9 +139,9 @@ export default async function DemoPage() {
           }}
         />
 
-        <VisitsChart data={data.chart} />
+        <SessionsChart data={data.sessionsChart} />
 
-        <TargetsList targets={data.targets} />
+        <TargetsList targets={data.targets} readyTargetIds={data.readyTargetIds} />
 
         <div>
           <div className="mb-4 flex items-center justify-between">

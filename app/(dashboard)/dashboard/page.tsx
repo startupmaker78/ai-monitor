@@ -1,12 +1,13 @@
 import Link from "next/link"
-import { Clock, Eye, Lightbulb } from "lucide-react"
+import { PlaySquare, Target, Sparkles, Lightbulb } from "lucide-react"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { getDashboardData } from "@/lib/dashboard-data"
 import { getSelectedSiteId } from "@/lib/selected-site"
+import { toUnicodeDomain } from "@/lib/domain-display"
 import { DEMO_TIER } from "@/lib/demo-tier-info"
 import { KpiCard } from "@/components/dashboard/kpi-card"
-import { VisitsChart } from "@/components/dashboard/visits-chart"
+import { SessionsChart } from "@/components/dashboard/sessions-chart"
 import { TierBadge } from "@/components/dashboard/tier-badge"
 import { UsageWidget } from "@/components/dashboard/usage-widget"
 import { TargetsList } from "@/components/dashboard/targets-list"
@@ -17,12 +18,6 @@ import { Card, CardContent } from "@/components/ui/card"
 
 export const metadata = {
   title: "Дашборд — Вебмонитор",
-}
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${String(s).padStart(2, "0")}`
 }
 
 export default async function DashboardPage({
@@ -63,6 +58,11 @@ export default async function DashboardPage({
     )
   }
 
+  const trackerActive = data.kpi.sessionsRecorded > 0
+  const metrikaConfigured = Boolean(
+    data.site.metrikaCounterId && data.site.metrikaToken,
+  )
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -71,7 +71,7 @@ export default async function DashboardPage({
             Привет, {session.user.name ?? "Пользователь"}!
           </h2>
           <p className="mt-1 text-muted-foreground">
-            Сводка по сайту {data.site.domain}
+            Сводка по сайту {toUnicodeDomain(data.site.domain)}
             {data.site.isDemo && (
               <span className="ml-2 inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10">
                 Демо
@@ -82,61 +82,49 @@ export default async function DashboardPage({
             <TierBadge name={data.tier.name} price={data.tier.price} />
           </div>
         </div>
-        <SyncButton
-          siteId={data.site.id}
-          metrikaConfigured={Boolean(
-            data.site.metrikaCounterId && data.site.metrikaToken,
-          )}
-        />
+        <SyncButton siteId={data.site.id} metrikaConfigured={metrikaConfigured} />
       </div>
 
-      {!data.hasMetrics && (
-        <Card className="border-amber-200 bg-amber-50/60">
-          <CardContent className="flex flex-wrap items-start justify-between gap-4 py-4">
-            <div className="min-w-0 flex-1">
-              <h3 className="font-semibold">
-                Ждём первых данных от вашего сайта
-              </h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Проверьте, что подключено, а что ещё нет — как только данные
-                появятся, они автоматически отобразятся здесь.
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              {/* Одна ссылка вместо развилки «Метрика/трекер»: на экране сайтов
-                  виджет статуса сам покажет, чего именно не хватает. Одна
-                  правда об онбординге в одном месте. */}
-              <Link href="/dashboard/settings/sites">
-                <Button size="sm" variant="outline">
-                  Проверить подключение
-                </Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <OnboardingBanner
+        trackerActive={trackerActive}
+        metrikaConfigured={metrikaConfigured}
+        targetsActive={data.kpi.targetsActive}
+        analysesTotal={data.analysesTotal}
+        readyToAnalyze={data.readyToAnalyze}
+      />
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {/* KPI-воронка: записали → отследили → проанализировали → нашли. */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <KpiCard
-          title="Визиты за 7 дней"
-          value={data.kpi.totalVisits7d.toLocaleString("ru-RU")}
-          description="Уникальные посещения"
-          icon={Eye}
+          title="Сессий записано"
+          value={data.kpi.sessionsRecorded.toLocaleString("ru-RU")}
+          description="Всего по сайту"
+          icon={PlaySquare}
         />
         <KpiCard
-          title="Среднее время"
-          value={formatDuration(data.kpi.avgDuration)}
-          description="На сайте, мин:сек"
-          icon={Clock}
+          title="Целей"
+          value={data.kpi.targetsActive.toString()}
+          description={
+            data.kpi.targetsTotal > data.kpi.targetsActive
+              ? `активных · ${data.kpi.targetsTotal} всего`
+              : "активных"
+          }
+          icon={Target}
+        />
+        <KpiCard
+          title="Анализов в этом месяце"
+          value={`${data.kpi.analysesThisMonth} из ${data.kpi.analysesLimit}`}
+          description="Расход и лимит тарифа"
+          icon={Sparkles}
         />
         <Link
           href="/dashboard/recommendations"
           className="block rounded-xl transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <KpiCard
-            title="Активные рекомендации"
-            value={data.kpi.totalActive.toString()}
-            description={`🔴 ${data.priorityCounts.CRITICAL} · 🟡 ${data.priorityCounts.IMPORTANT} · 🟢 ${data.priorityCounts.GOOD}`}
+            title="Рекомендаций получено"
+            value={data.kpi.recommendationsReceived.toString()}
+            description={`🔴 ${data.recPriorityReceived.CRITICAL} · 🟡 ${data.recPriorityReceived.IMPORTANT} · 🟢 ${data.recPriorityReceived.GOOD}`}
             icon={Lightbulb}
           />
         </Link>
@@ -152,11 +140,76 @@ export default async function DashboardPage({
         }}
       />
 
-      <VisitsChart data={data.chart} />
+      <SessionsChart data={data.sessionsChart} />
 
-      <TargetsList targets={data.targets} />
+      <TargetsList targets={data.targets} readyTargetIds={data.readyTargetIds} />
 
       <EngagementBlock engagement={data.engagement} />
     </div>
+  )
+}
+
+// Пустое/переходное состояние продукта — 3 ветки, каждая ведёт к действию.
+// Приоритет: подключение → цель → готовность к анализу. Иначе — молчим.
+function OnboardingBanner({
+  trackerActive,
+  metrikaConfigured,
+  targetsActive,
+  analysesTotal,
+  readyToAnalyze,
+}: {
+  trackerActive: boolean
+  metrikaConfigured: boolean
+  targetsActive: number
+  analysesTotal: number
+  readyToAnalyze: { count: number; firstName: string | null }
+}) {
+  let title: string
+  let text: string
+  let href: string
+  let cta: string
+
+  if (!trackerActive || !metrikaConfigured) {
+    title = "Проверьте подключение сайта"
+    text =
+      "Пока не всё подключено — на экране сайтов видно, чего именно не хватает (трекер или Метрика)."
+    href = "/dashboard/settings/sites"
+    cta = "Проверить подключение"
+  } else if (targetsActive === 0) {
+    title = "Задайте первую цель"
+    text =
+      "Цель — это действие, к которому вы ведёте посетителей. По ней Вебмонитор соберёт сессии и найдёт, что мешает конверсии."
+    href = "/dashboard/targets"
+    cta = "Задать цель"
+  } else if (analysesTotal === 0 && readyToAnalyze.count > 0) {
+    const name = readyToAnalyze.firstName
+    title =
+      readyToAnalyze.count === 1 && name
+        ? `Цель «${name}» готова к анализу`
+        : `${readyToAnalyze.count} цели готовы к анализу`
+    text =
+      "Набрано достаточно сессий — можно запускать анализ, не дожидаясь полного сбора."
+    href = "/dashboard/recommendations"
+    cta = "Запустить анализ"
+  } else {
+    return null
+  }
+
+  return (
+    <Card className="border-amber-200 bg-amber-50/60">
+      <CardContent className="flex flex-wrap items-start justify-between gap-4 py-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold">{title}</h3>
+          <p className="mt-1 text-sm text-muted-foreground">{text}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link href={href}>
+            <Button size="sm" variant="outline">
+              {cta}
+            </Button>
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

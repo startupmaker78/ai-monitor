@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { getConnectionStatus } from "@/lib/connection-status"
+import { toUnicodeDomain } from "@/lib/domain-display"
 import { SitesClient } from "./sites-client"
 
 export const metadata = { title: "Сайты — Вебмонитор" }
@@ -37,5 +38,11 @@ export default async function SitesPage() {
     ),
   )
 
-  return <SitesClient initialSites={sites} statuses={statuses} />
+  // Punycode → человекочитаемый домен для показа (декодируем на сервере).
+  const sitesForClient = sites.map((s) => ({
+    ...s,
+    displayDomain: toUnicodeDomain(s.domain),
+  }))
+
+  return <SitesClient initialSites={sitesForClient} statuses={statuses} />
 }

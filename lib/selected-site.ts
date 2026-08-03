@@ -1,5 +1,6 @@
 import { cookies } from "next/headers"
 import { prisma } from "@/lib/prisma"
+import { toUnicodeDomain } from "@/lib/domain-display"
 
 // Единый источник выбранного сайта для всех страниц дашборда (cookie-based).
 // Порядок: ?site=override (deep-link) → cookie wm_site → первый сайт. Каждый
@@ -8,7 +9,13 @@ import { prisma } from "@/lib/prisma"
 
 export const SELECTED_SITE_COOKIE = "wm_site"
 
-export type OwnerSiteLite = { id: string; domain: string }
+// displayDomain — человекочитаемый (Punycode декодирован), для показа в UI.
+// domain — исходный (может быть xn--…), для технических нужд.
+export type OwnerSiteLite = {
+  id: string
+  domain: string
+  displayDomain: string
+}
 
 export async function getOwnerRealSites(
   userId: string,
@@ -25,7 +32,10 @@ export async function getOwnerRealSites(
       },
     },
   })
-  return op?.sites ?? []
+  return (op?.sites ?? []).map((s) => ({
+    ...s,
+    displayDomain: toUnicodeDomain(s.domain),
+  }))
 }
 
 export async function getUserSitesAndSelected(

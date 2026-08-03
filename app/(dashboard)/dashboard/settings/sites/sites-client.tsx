@@ -3,7 +3,15 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Check, Copy, Trash2, CheckCircle2, Circle } from "lucide-react"
+import {
+  Check,
+  Copy,
+  CheckCircle2,
+  Circle,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+} from "lucide-react"
 import type { ConnectionStatus } from "@/lib/connection-status"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,6 +28,7 @@ import { buildTrackerSnippet } from "@/lib/site-utils"
 type Site = {
   id: string
   domain: string
+  displayDomain: string // Punycode декодирован (для показа)
   name: string | null
   trackingToken: string
   isDemo: boolean
@@ -39,6 +48,10 @@ export function SitesClient({ initialSites, statuses }: Props) {
   const [createError, setCreateError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Форма добавления свёрнута в кнопку. Исключение — ноль сайтов: это первый
+  // шаг онбординга, прятать нельзя.
+  const hasSites = initialSites.filter((s) => !s.isDemo).length > 0
+  const [formOpen, setFormOpen] = useState(!hasSites)
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -62,6 +75,7 @@ export function SitesClient({ initialSites, statuses }: Props) {
       }
       setDomain("")
       setName("")
+      setFormOpen(false) // добавили — сворачиваем форму, показываем список
       router.refresh()
       setCreating(false)
     } catch (err) {
@@ -73,7 +87,7 @@ export function SitesClient({ initialSites, statuses }: Props) {
   async function handleDelete(site: Site) {
     if (
       !confirm(
-        `Удалить сайт «${site.domain}»? Все собранные сессии и записи будут удалены безвозвратно.`,
+        `Удалить сайт «${site.displayDomain}»? Все собранные сессии и записи будут удалены безвозвратно.`,
       )
     ) {
       return
@@ -105,11 +119,9 @@ export function SitesClient({ initialSites, statuses }: Props) {
     }
   }
 
-  // Defensive filter: демо-сайтов больше не должно быть (cleanup в этом
-  // же коммите), но если что-то останется — не рендерим.
+  // Defensive filter: демо-сайтов больше не должно быть, но если что-то
+  // останется — не рендерим.
   const visibleSites = initialSites.filter((s) => !s.isDemo)
-  const showEmptyHint =
-    visibleSites.length === 0 && !domain && !name && !creating
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -121,77 +133,96 @@ export function SitesClient({ initialSites, statuses }: Props) {
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Добавить сайт</CardTitle>
-          <CardDescription>
-            Введите домен — мы автоматически очистим протокол, www и
-            параметры.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="domain">Адрес сайта</Label>
-              <Input
-                id="domain"
-                name="domain"
-                type="text"
-                placeholder="nolim.cc"
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                required
-                disabled={creating}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="name">Название (необязательно)</Label>
-              <Input
-                id="name"
-                name="name"
-                type="text"
-                placeholder="Главный сайт"
-                maxLength={100}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={creating}
-              />
-            </div>
-            {createError && (
-              <p className="text-sm text-destructive">{createError}</p>
-            )}
-            <Button type="submit" disabled={creating || !domain.trim()}>
-              {creating ? "Добавление..." : "Добавить сайт"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
       {deleteError && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
           {deleteError}
         </div>
       )}
 
-      {showEmptyHint && (
-        <p className="text-sm text-muted-foreground">
-          У вас пока нет подключённых сайтов. Добавьте первый сайт чтобы
-          начать сбор данных.
-        </p>
+      {/* Список сайтов — сразу под заголовком (смотрят постоянно). */}
+      {visibleSites.length > 0 && (
+        <div className="space-y-3">
+          {visibleSites.map((site) => (
+            <SiteCard
+              key={site.id}
+              site={site}
+              status={statuses[site.id]}
+              copied={copiedId === site.id}
+              onCopy={() => handleCopy(site)}
+              onDelete={() => handleDelete(site)}
+            />
+          ))}
+        </div>
       )}
 
-      <div className="space-y-3">
-        {visibleSites.map((site) => (
-          <SiteCard
-            key={site.id}
-            site={site}
-            status={statuses[site.id]}
-            copied={copiedId === site.id}
-            onCopy={() => handleCopy(site)}
-            onDelete={() => handleDelete(site)}
-          />
-        ))}
-      </div>
+      {/* Форма добавления — свёрнута в кнопку (добавляют редко). При нуле
+          сайтов formOpen=true (первый шаг онбординга — не прячем). */}
+      {formOpen ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Добавить сайт</CardTitle>
+            <CardDescription>
+              Введите домен — мы автоматически очистим протокол, www и
+              параметры.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="domain">Адрес сайта</Label>
+                <Input
+                  id="domain"
+                  name="domain"
+                  type="text"
+                  placeholder="nolim.cc"
+                  value={domain}
+                  onChange={(e) => setDomain(e.target.value)}
+                  required
+                  disabled={creating}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="name">Название (необязательно)</Label>
+                <Input
+                  id="name"
+                  name="name"
+                  type="text"
+                  placeholder="Главный сайт"
+                  maxLength={100}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={creating}
+                />
+              </div>
+              {createError && (
+                <p className="text-sm text-destructive">{createError}</p>
+              )}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={creating || !domain.trim()}>
+                  {creating ? "Добавление..." : "Добавить сайт"}
+                </Button>
+                {hasSites && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setFormOpen(false)
+                      setCreateError(null)
+                    }}
+                    disabled={creating}
+                  >
+                    Отмена
+                  </Button>
+                )}
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : (
+        <Button variant="outline" onClick={() => setFormOpen(true)}>
+          <Plus className="mr-1 h-4 w-4" /> Добавить сайт
+        </Button>
+      )}
     </div>
   )
 }
@@ -298,67 +329,100 @@ function SiteCard({
   onCopy: () => void
   onDelete: () => void
 }) {
+  const allGreen = Boolean(
+    status &&
+      status.trackerActive &&
+      status.metrikaConfigured &&
+      status.syncHasData,
+  )
+  // Всё подключено → свёрнуто в строку (смотрят постоянно, настраивать нечего).
+  // Что-то не закрыто → развёрнуто (юзеру есть что делать — не прячем).
+  const [open, setOpen] = useState(false)
+  const showDetails = !allGreen || open
   const snippet = buildTrackerSnippet(site.trackingToken)
+
   return (
     <Card>
       <CardContent className="space-y-4 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="truncate text-lg font-semibold">{site.domain}</h3>
-              {site.isDemo && (
-                <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                  Демо-стенд
+        {allGreen ? (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="flex w-full items-center gap-2 text-left"
+          >
+            {open ? (
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-lg font-semibold">
+                {site.displayDomain}
+              </span>
+              {site.name && (
+                <span className="block truncate text-sm text-muted-foreground">
+                  {site.name}
                 </span>
               )}
-            </div>
+            </span>
+            <span className="ml-auto flex shrink-0 items-center gap-1 text-sm text-green-600">
+              <CheckCircle2 className="h-4 w-4" /> Всё подключено
+            </span>
+          </button>
+        ) : (
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-semibold">
+              {site.displayDomain}
+            </h3>
             {site.name && (
               <p className="truncate text-sm text-muted-foreground">
                 {site.name}
               </p>
             )}
           </div>
-          {!site.isDemo && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onDelete}
-            >
-              <Trash2 className="mr-1 h-4 w-4" /> Удалить
-            </Button>
-          )}
-        </div>
+        )}
 
-        {!site.isDemo && status && <ConnectionStatusWidget status={status} />}
+        {!allGreen && status && <ConnectionStatusWidget status={status} />}
 
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Код для вставки на сайт</p>
-          <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
-            <code>{snippet}</code>
-          </pre>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onCopy}
-          >
-            {copied ? (
-              <>
-                <Check className="mr-1 h-3 w-3" /> Скопировано
-              </>
-            ) : (
-              <>
-                <Copy className="mr-1 h-3 w-3" /> Копировать
-              </>
-            )}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            Вставьте этот код в раздел «Шапка» или «Подвал» настроек
-            сайта. Для Tilda: Настройки сайта → Дополнительно → HTML код
-            для вставки внутрь HEAD.
-          </p>
-        </div>
+        {showDetails && (
+          <>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Код для вставки на сайт</p>
+              {/* whitespace-pre-wrap+break-all: длинный сниппет переносится
+                  целиком, не обрезается справа. Копируется всегда полностью. */}
+              <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">
+                <code>{snippet}</code>
+              </pre>
+              <Button type="button" variant="outline" size="sm" onClick={onCopy}>
+                {copied ? (
+                  <>
+                    <Check className="mr-1 h-3 w-3" /> Скопировано
+                  </>
+                ) : (
+                  <>
+                    <Copy className="mr-1 h-3 w-3" /> Копировать
+                  </>
+                )}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Вставьте этот код в раздел «Шапка» или «Подвал» настроек
+                сайта. Для Tilda: Настройки сайта → Дополнительно → HTML код
+                для вставки внутрь HEAD.
+              </p>
+            </div>
+
+            {/* Удаление — неакцентное, в развороте (опасное и редкое). */}
+            <div className="flex justify-end border-t pt-3">
+              <button
+                type="button"
+                onClick={onDelete}
+                className="text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline"
+              >
+                Удалить сайт
+              </button>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   )

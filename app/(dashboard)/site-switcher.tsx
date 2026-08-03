@@ -36,7 +36,7 @@ export function SiteSwitcher({
     >
       {sites.map((s) => (
         <option key={s.id} value={s.id}>
-          {s.domain}
+          {s.displayDomain}
         </option>
       ))}
     </select>

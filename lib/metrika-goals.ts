@@ -70,7 +70,9 @@ export type GoalRelevance = {
 export type ConversionErrorReason =
   | "auth_failed" // токен протух/недействителен
   | "counter_forbidden" // нет доступа к счётчику
-  | "goal_deleted" // цель удалена в Метрике
+  | "goal_deleted" // цель удалена в Метрике (stat отдаёт 400)
+  | "goal_archived" // цель заархивирована ПОСЛЕ выбора: stat отдаёт 200 с 0,
+  // не 400 — выглядела бы как честный 0%. Ловим сверкой членства в /goals.
   | "metrika_unavailable" // сеть/5xx/невалидный ответ
   | "rate_limited" // 420/429
   | "no_data" // у Метрики 0 визитов И у нас ~0 — честно нечего считать

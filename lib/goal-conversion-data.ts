@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma"
 import { validateSiteOwnership } from "@/lib/site-data"
 import {
   fetchGoalConversion,
+  fetchMetrikaGoals,
   type ConversionErrorReason,
 } from "@/lib/metrika-goals"
 
@@ -80,6 +81,29 @@ export async function getGoalConversionForTarget(
   })
 
   if (conv.ok) {
+    // Заархивированная ПОСЛЕ выбора цель: Метрика перестаёт собирать данные, но
+    // stat отдаёт 200 с conversionRate=0 (не 400, как удалённая) — блок показал
+    // бы «0%», самое дорогое враньё. Ленивая сверка ТОЛЬКО при нулевой
+    // конверсии (+1 вызов только здесь, здоровый ненулевой путь не дорожает):
+    // архивная исчезает из /goals. Best-effort — /goals сам не ответил →
+    // оставляем 0%, не выдумываем архивацию. Честный ноль живой цели (goalId
+    // ЕСТЬ в /goals) остаётся 0%.
+    if (conv.conversionRate === 0) {
+      const goalsRes = await fetchMetrikaGoals(
+        site.metrikaCounterId,
+        site.metrikaToken,
+      )
+      if (
+        goalsRes.ok &&
+        !goalsRes.goals.some((g) => g.id === target.metrikaGoalId)
+      ) {
+        return {
+          state: "error",
+          reason: "goal_archived",
+          goalName: target.metrikaGoalName,
+        }
+      }
+    }
     return {
       state: "ok",
       goalName: target.metrikaGoalName,

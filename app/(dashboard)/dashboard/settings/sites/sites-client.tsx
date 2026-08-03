@@ -2,7 +2,9 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Check, Copy, Trash2 } from "lucide-react"
+import Link from "next/link"
+import { Check, Copy, Trash2, CheckCircle2, Circle } from "lucide-react"
+import type { ConnectionStatus } from "@/lib/connection-status"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -26,9 +28,10 @@ type Site = {
 
 type Props = {
   initialSites: Site[]
+  statuses: Record<string, ConnectionStatus>
 }
 
-export function SitesClient({ initialSites }: Props) {
+export function SitesClient({ initialSites, statuses }: Props) {
   const router = useRouter()
   const [domain, setDomain] = useState("")
   const [name, setName] = useState("")
@@ -182,6 +185,7 @@ export function SitesClient({ initialSites }: Props) {
           <SiteCard
             key={site.id}
             site={site}
+            status={statuses[site.id]}
             copied={copiedId === site.id}
             onCopy={() => handleCopy(site)}
             onDelete={() => handleDelete(site)}
@@ -192,13 +196,104 @@ export function SitesClient({ initialSites }: Props) {
   )
 }
 
+function StatusRow({
+  done,
+  doneText,
+  children,
+}: {
+  done: boolean
+  doneText: string
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="flex items-start gap-2 text-sm">
+      {done ? (
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+      ) : (
+        <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+      )}
+      {done ? (
+        <span className="text-muted-foreground">{doneText}</span>
+      ) : (
+        <span>{children}</span>
+      )}
+    </div>
+  )
+}
+
+// Виджет статуса подключения. Только DB-сигналы (getConnectionStatus).
+// Незакрытые пункты ведут к действию. Всё зелёное → сворачивается в одну
+// зелёную строку. Цели/«живость» не тащим (стоят вызовов Метрики).
+function ConnectionStatusWidget({ status }: { status: ConnectionStatus }) {
+  const allGreen =
+    status.trackerActive && status.metrikaConfigured && status.syncHasData
+
+  if (allGreen) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+        <CheckCircle2 className="h-4 w-4 shrink-0" />
+        Всё подключено — данные собираются.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Статус подключения
+      </p>
+
+      {/* Трекер. count===0 неоднозначен (ещё не поставили ИЛИ поставили и
+          сломалось — по нулю сессий дёшево не различить, сессий-то нет),
+          поэтому формулировка НЕЙТРАЛЬНАЯ, без обвинения. */}
+      <StatusRow done={status.trackerActive} doneText="Трекер шлёт сессии">
+        Трекер ещё не прислал ни одной сессии — вставьте код ниже ↓
+      </StatusRow>
+
+      <StatusRow
+        done={status.metrikaConfigured}
+        doneText="Яндекс.Метрика подключена"
+      >
+        Метрика не подключена —{" "}
+        <Link
+          href="/dashboard/settings/metrika"
+          className="font-medium text-primary underline underline-offset-2"
+        >
+          подключить
+        </Link>
+      </StatusRow>
+
+      {/* Синк зависит от Метрики. Без Метрики — нейтральное ожидание; с
+          Метрикой без данных — «после закрытия суток» (это НЕ ошибка). */}
+      {!status.metrikaConfigured ? (
+        <div className="flex items-start gap-2 text-sm">
+          <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="text-muted-foreground">
+            Данные Метрики — после подключения счётчика
+          </span>
+        </div>
+      ) : (
+        <StatusRow
+          done={status.syncHasData}
+          doneText="Метрика присылает данные"
+        >
+          Данные Метрики появятся после закрытия суток — обычно на следующий
+          день
+        </StatusRow>
+      )}
+    </div>
+  )
+}
+
 function SiteCard({
   site,
+  status,
   copied,
   onCopy,
   onDelete,
 }: {
   site: Site
+  status?: ConnectionStatus
   copied: boolean
   onCopy: () => void
   onDelete: () => void
@@ -234,6 +329,8 @@ function SiteCard({
             </Button>
           )}
         </div>
+
+        {!site.isDemo && status && <ConnectionStatusWidget status={status} />}
 
         <div className="space-y-2">
           <p className="text-sm font-medium">Код для вставки на сайт</p>

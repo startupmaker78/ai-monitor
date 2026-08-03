@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { getConnectionStatus } from "@/lib/connection-status"
 import { SitesClient } from "./sites-client"
 
 export const metadata = { title: "Сайты — Вебмонитор" }
@@ -28,5 +29,13 @@ export default async function SitesPage() {
     },
   })
 
-  return <SitesClient initialSites={sites} />
+  // Статус подключения на каждый сайт (дёшево, только DB). Сайтов мало —
+  // последовательный map по индексированным запросам ок.
+  const statuses = Object.fromEntries(
+    await Promise.all(
+      sites.map(async (s) => [s.id, await getConnectionStatus(s.id)] as const),
+    ),
+  )
+
+  return <SitesClient initialSites={sites} statuses={statuses} />
 }

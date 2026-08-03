@@ -278,6 +278,19 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
       firstName: readyTargets[0]?.name ?? readyTargets[0]?.url ?? null,
     },
     readyTargetIds: readyTargets.map((t) => t.id),
+    analysesRemaining: usage.analysesRemaining,
+    // Свежие критичные находки (🔴) — из уже загруженного topRecommendations
+    // (NEW/IN_PROGRESS), сорт по дате убыв., 4 шт. Новых запросов нет.
+    freshCritical: topRecommendations
+      .filter((r) => r.priority === "CRITICAL")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 4)
+      .map((r) => ({
+        id: r.id,
+        title: r.title,
+        targetId: r.analysis.targetId,
+        targetName: r.analysis.target.name ?? r.analysis.target.url,
+      })),
     analysesTotal,
     sessionsChart,
     recommendations: topRecommendations.slice(0, 10),

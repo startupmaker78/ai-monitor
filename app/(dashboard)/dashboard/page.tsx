@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { PlaySquare, Target, Sparkles, Lightbulb } from "lucide-react"
+import { PlaySquare, Lightbulb } from "lucide-react"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { getDashboardData } from "@/lib/dashboard-data"
@@ -7,6 +7,7 @@ import { getSelectedSiteId } from "@/lib/selected-site"
 import { toUnicodeDomain } from "@/lib/domain-display"
 import { DEMO_TIER } from "@/lib/demo-tier-info"
 import { KpiCard } from "@/components/dashboard/kpi-card"
+import { FreshRecommendations } from "@/components/dashboard/fresh-recommendations"
 import { SessionsChart } from "@/components/dashboard/sessions-chart"
 import { TierBadge } from "@/components/dashboard/tier-badge"
 import { UsageWidget } from "@/components/dashboard/usage-widget"
@@ -90,32 +91,18 @@ export default async function DashboardPage({
         metrikaConfigured={metrikaConfigured}
         targetsActive={data.kpi.targetsActive}
         analysesTotal={data.analysesTotal}
+        analysesRemaining={data.analysesRemaining}
         readyToAnalyze={data.readyToAnalyze}
       />
 
-      {/* KPI-воронка: записали → отследили → проанализировали → нашли. */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* Два продуктовых KPI (крупнее). Цели и «анализов в этом месяце» УБРАНЫ:
+          дублировали тарифный блок (там есть контекст лимита/остатка). */}
+      <div className="grid gap-4 sm:grid-cols-2">
         <KpiCard
           title="Сессий записано"
           value={data.kpi.sessionsRecorded.toLocaleString("ru-RU")}
           description="Всего по сайту"
           icon={PlaySquare}
-        />
-        <KpiCard
-          title="Целей"
-          value={data.kpi.targetsActive.toString()}
-          description={
-            data.kpi.targetsTotal > data.kpi.targetsActive
-              ? `активных · ${data.kpi.targetsTotal} всего`
-              : "активных"
-          }
-          icon={Target}
-        />
-        <KpiCard
-          title="Анализов в этом месяце"
-          value={`${data.kpi.analysesThisMonth} из ${data.kpi.analysesLimit}`}
-          description="Расход и лимит тарифа"
-          icon={Sparkles}
         />
         <Link
           href="/dashboard/recommendations"
@@ -129,6 +116,8 @@ export default async function DashboardPage({
           />
         </Link>
       </div>
+
+      <FreshRecommendations items={data.freshCritical} />
 
       <UsageWidget
         usage={data.usage}
@@ -156,18 +145,25 @@ function OnboardingBanner({
   metrikaConfigured,
   targetsActive,
   analysesTotal,
+  analysesRemaining,
   readyToAnalyze,
 }: {
   trackerActive: boolean
   metrikaConfigured: boolean
   targetsActive: number
   analysesTotal: number
+  analysesRemaining: number
   readyToAnalyze: { count: number; firstName: string | null }
 }) {
   let title: string
   let text: string
   let href: string
   let cta: string
+
+  const readyTitle = (name: string | null, count: number) =>
+    count === 1 && name
+      ? `Цель «${name}» готова к анализу`
+      : `${count} ${count < 5 ? "цели" : "целей"} готовы к анализу`
 
   if (!trackerActive || !metrikaConfigured) {
     title = "Проверьте подключение сайта"
@@ -182,13 +178,18 @@ function OnboardingBanner({
     href = "/dashboard/targets"
     cta = "Задать цель"
   } else if (analysesTotal === 0 && readyToAnalyze.count > 0) {
-    const name = readyToAnalyze.firstName
-    title =
-      readyToAnalyze.count === 1 && name
-        ? `Цель «${name}» готова к анализу`
-        : `${readyToAnalyze.count} цели готовы к анализу`
+    // Новичок: первый анализ.
+    title = readyTitle(readyToAnalyze.firstName, readyToAnalyze.count)
     text =
       "Набрано достаточно сессий — можно запускать анализ, не дожидаясь полного сбора."
+    href = "/dashboard/recommendations"
+    cta = "Запустить анализ"
+  } else if (readyToAnalyze.count > 0 && analysesRemaining > 0) {
+    // Зрелый (вариант A): ЕЩЁ НЕ проанализированные готовые цели + есть остаток
+    // лимита. Уже проанализированные сюда НЕ попадают (readyToAnalyze их
+    // исключает) — не толкаем жечь анализ повторно на тех же сессиях.
+    title = readyTitle(readyToAnalyze.firstName, readyToAnalyze.count)
+    text = `Набрано достаточно сессий. В этом месяце доступно анализов: ${analysesRemaining}.`
     href = "/dashboard/recommendations"
     cta = "Запустить анализ"
   } else {

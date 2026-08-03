@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { PlaySquare, Target, Sparkles, Lightbulb } from "lucide-react"
+import { PlaySquare, Lightbulb, Sparkles } from "lucide-react"
 import { getDashboardData } from "@/lib/dashboard-data"
 import { DEMO_TIER } from "@/lib/demo-tier-info"
 import { KpiCard } from "@/components/dashboard/kpi-card"
@@ -98,28 +98,12 @@ export default async function DemoPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <KpiCard
             title="Сессий записано"
             value={data.kpi.sessionsRecorded.toLocaleString("ru-RU")}
             description="Всего по сайту"
             icon={PlaySquare}
-          />
-          <KpiCard
-            title="Целей"
-            value={data.kpi.targetsActive.toString()}
-            description={
-              data.kpi.targetsTotal > data.kpi.targetsActive
-                ? `активных · ${data.kpi.targetsTotal} всего`
-                : "активных"
-            }
-            icon={Target}
-          />
-          <KpiCard
-            title="Анализов в этом месяце"
-            value={`${data.kpi.analysesThisMonth} из ${data.kpi.analysesLimit}`}
-            description="Расход и лимит тарифа"
-            icon={Sparkles}
           />
           <KpiCard
             title="Рекомендаций получено"

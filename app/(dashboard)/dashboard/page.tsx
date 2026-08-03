@@ -98,20 +98,17 @@ export default async function DashboardPage({
                 Ждём первых данных от вашего сайта
               </h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Подключите Яндекс.Метрику или проверьте что трекер
-                установлен на сайте — как только данные появятся, они
-                автоматически отобразятся здесь.
+                Проверьте, что подключено, а что ещё нет — как только данные
+                появятся, они автоматически отобразятся здесь.
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
-              <Link href="/dashboard/settings/metrika">
-                <Button size="sm" variant="outline">
-                  Настроить Метрику
-                </Button>
-              </Link>
+              {/* Одна ссылка вместо развилки «Метрика/трекер»: на экране сайтов
+                  виджет статуса сам покажет, чего именно не хватает. Одна
+                  правда об онбординге в одном месте. */}
               <Link href="/dashboard/settings/sites">
                 <Button size="sm" variant="outline">
-                  Проверить трекер
+                  Проверить подключение
                 </Button>
               </Link>
             </div>

@@ -207,10 +207,14 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
 
   return {
     site,
-    // hasMetrics=false означает что Site есть, но MetricsSnapshot ещё не
-    // накопились — Метрика не подключена либо первый sync не сработал.
-    // Frontend показывает банер «Ждём первых данных» сверху дашборда.
-    hasMetrics: allSnapshots.length > 0,
+    // hasMetrics=false → показываем «Ждём первых данных». Сигнал ЧЕСТНЫЙ:
+    // хоть один снапшот с visits>0, а НЕ просто наличие снапшотов. У свежего
+    // счётчика синк создаёт ~30 НУЛЕВЫХ снапшотов → allSnapshots.length>0 был
+    // true при нуле данных, и новый клиент видел дашборд с нулями вместо
+    // «данные ещё идут». visits>0 — тот же сигнал, что в виджете статуса
+    // (lib/connection-status.ts syncHasData). Считаем из уже загруженного
+    // allSnapshots — без второго запроса.
+    hasMetrics: allSnapshots.some((s) => s.visits > 0),
     kpi: {
       totalVisits7d,
       avgDuration,

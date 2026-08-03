@@ -154,11 +154,10 @@ const GOAL_TYPE_LABELS: Record<string, string> = {
   e_purchase: "покупка",
   e_cart: "добавление в корзину",
   step: "составная цель",
+  multi: "мультицель", // type:"multi" — до 10 подцелей через ИЛИ (children[])
+  param: "цель по параметрам", // type:"param" — conditions по параметрам события
   visit_duration: "время на сайте",
   number: "глубина",
-  // «Параметры» и «Мультицель» из UI Метрики — их API-строку `type` дампом НЕ
-  // подтвердили; добавить, когда увидим реальное значение. До тех пор typeLabel
-  // безопасно покажет сырое значение (не падает).
 }
 
 function typeLabel(t: string): string {

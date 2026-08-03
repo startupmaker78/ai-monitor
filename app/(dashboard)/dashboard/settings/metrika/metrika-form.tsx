@@ -2,9 +2,11 @@
 
 // React 18 pattern: useFormState/useFormStatus from react-dom.
 import { useFormState, useFormStatus } from "react-dom"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { guideHref } from "@/lib/guide-anchors"
 import {
   Card,
   CardContent,
@@ -97,8 +99,26 @@ export function MetrikaForm({
           {state?.ok === false && state.error && (
             <p className="text-sm text-destructive">{state.error}</p>
           )}
-          {state?.ok === true && state.message && (
+          {state?.ok === true && state.status === "connected" && state.message && (
             <p className="text-sm text-green-600">{state.message}</p>
+          )}
+          {state?.ok === true && state.status === "warn" && state.message && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {state.message}
+              {state.showTokenGuide && (
+                <>
+                  {" "}
+                  <Link
+                    href={guideHref("token")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium underline underline-offset-2"
+                  >
+                    Как получить токен
+                  </Link>
+                </>
+              )}
+            </div>
           )}
 
           <SubmitButton />

@@ -24,6 +24,7 @@ export type MetrikaFetchResult =
       ok: false
       error:
         | "auth_failed"
+        | "counter_forbidden"
         | "counter_not_found"
         | "network_error"
         | "invalid_response"
@@ -65,8 +66,14 @@ export async function fetchMetrikaDaily(
     }
   }
 
-  if (response.status === 401 || response.status === 403) {
+  // 401 и 403 РАЗДЕЛЕНЫ (иначе «нет доступа к счётчику» показывалось бы как
+  // «токен недействителен» — юзер зря перевыпускал бы рабочий токен). Как в
+  // пути целей (lib/metrika-goals.ts).
+  if (response.status === 401) {
     return { ok: false, error: "auth_failed" }
+  }
+  if (response.status === 403) {
+    return { ok: false, error: "counter_forbidden" }
   }
   if (response.status === 404) {
     return { ok: false, error: "counter_not_found" }

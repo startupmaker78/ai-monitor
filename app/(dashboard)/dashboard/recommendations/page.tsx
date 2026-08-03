@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import {
@@ -29,11 +30,17 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
       <div className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight">Рекомендации</h2>
         <Card>
-          <CardContent className="py-12 text-center">
+          <CardContent className="space-y-4 py-12 text-center">
             <p className="text-muted-foreground">
-              Пока нет готовых рекомендаций. Соберите сессии по цели и
-              запустите анализ.
+              Пока нет готовых рекомендаций. Задайте цель, соберите по ней
+              сессии и запустите анализ.
             </p>
+            <Link
+              href="/dashboard/targets"
+              className="inline-block font-medium text-primary underline underline-offset-2"
+            >
+              Перейти к целям
+            </Link>
           </CardContent>
         </Card>
       </div>

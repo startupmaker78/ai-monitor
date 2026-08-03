@@ -1,8 +1,10 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { getTargetsPageData } from "@/lib/targets-data"
 import { getSelectedSiteId } from "@/lib/selected-site"
 import { getMinSessionsBudget } from "@/lib/config"
+import { Button } from "@/components/ui/button"
 import { TargetsClient } from "./targets-client"
 
 export const metadata = { title: "Цели анализа — Вебмонитор" }
@@ -25,10 +27,12 @@ export default async function TargetsPage({ searchParams }: PageProps) {
           Цели анализа
         </h2>
         <div className="rounded-lg border bg-card p-8 text-center">
-          <p className="text-muted-foreground">
-            У вас пока нет сайтов. Управление сайтами появится в следующих
-            обновлениях.
+          <p className="mb-4 text-muted-foreground">
+            Добавьте сайт, чтобы задавать цели анализа.
           </p>
+          <Button asChild>
+            <Link href="/dashboard/settings/sites">Добавить сайт</Link>
+          </Button>
         </div>
       </div>
     )

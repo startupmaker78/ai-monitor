@@ -108,17 +108,32 @@ type GetResult =
   | { ok: true; json: unknown }
   | { ok: false; reason: GetReason; detail?: string }
 
-async function metrikaGet(url: string, token: string): Promise<GetResult> {
+async function metrikaGet(
+  url: string,
+  token: string,
+  timeoutMs?: number,
+): Promise<GetResult> {
+  // timeoutMs — для тест-вызова при сохранении (verifyMetrikaCounter), чтобы
+  // сохранение не висло, если Метрика не отвечает. Прочие вызовы — без лимита
+  // (как было). Abort → fetch бросит → ловим ниже как metrika_unavailable.
+  const controller = timeoutMs ? new AbortController() : undefined
+  const timer =
+    controller && timeoutMs
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : undefined
   let res: Response
   try {
     res = await fetch(url, {
       headers: { Authorization: `OAuth ${token}`, Accept: "application/json" },
+      signal: controller?.signal,
     })
   } catch (err) {
-    // Сеть. err.message генерик, токен в него не попадает (он в заголовке,
-    // url без токена). Логируем без url (в url нет токена, но и незачем).
+    // Сеть/таймаут. err.message генерик, токен в него не попадает (он в
+    // заголовке, url без токена). Логируем без url.
     console.error(`[metrika-goals] network error: ${(err as Error).message}`)
     return { ok: false, reason: "metrika_unavailable" }
+  } finally {
+    if (timer) clearTimeout(timer)
   }
   if (res.status === 401) return { ok: false, reason: "auth_failed" }
   if (res.status === 403) return { ok: false, reason: "counter_forbidden" }
@@ -191,6 +206,50 @@ export async function fetchMetrikaGoals(
     }
   })
   return { ok: true, goals }
+}
+
+// ─── Проверка связи при сохранении настроек ──────────────────────────────
+
+const VERIFY_TIMEOUT_MS = 8000
+
+export type MetrikaVerifyResult =
+  | { ok: true; goalCount: number }
+  | {
+      ok: false
+      reason:
+        | "auth_failed"
+        | "counter_forbidden"
+        | "counter_not_found"
+        | "rate_limited"
+        | "metrika_unavailable"
+    }
+
+// Тест-вызов при сохранении настроек Метрики: дёргаем /goals с таймаутом. Даёт
+// сразу и проверку связи, и число целей для сообщения — отдельного вызова не
+// надо. 403 и 404 РАЗЛИЧАЕМ (metrikaGet различает на уровне GetReason), чтобы
+// сказать «нет доступа к счётчику» vs «счётчик не найден» — не путать юзера.
+export async function verifyMetrikaCounter(
+  counterId: string,
+  token: string,
+): Promise<MetrikaVerifyResult> {
+  const url = `${MGMT_BASE}/${encodeURIComponent(counterId)}/goals`
+  const r = await metrikaGet(url, token, VERIFY_TIMEOUT_MS)
+  if (!r.ok) {
+    switch (r.reason) {
+      case "auth_failed":
+        return { ok: false, reason: "auth_failed" }
+      case "counter_forbidden":
+        return { ok: false, reason: "counter_forbidden" }
+      case "not_found":
+        return { ok: false, reason: "counter_not_found" }
+      case "rate_limited":
+        return { ok: false, reason: "rate_limited" }
+      default: // bad_request | metrika_unavailable (включая таймаут)
+        return { ok: false, reason: "metrika_unavailable" }
+    }
+  }
+  const goals = (r.json as { goals?: unknown }).goals
+  return { ok: true, goalCount: Array.isArray(goals) ? goals.length : 0 }
 }
 
 // ─── Достижения для сортировки (батчи ≤20 метрик) ────────────────────────

@@ -13,6 +13,11 @@ const schema = z.object({ siteId: z.string().min(1) })
 const userMessages: Record<string, string> = {
   auth_failed:
     "Токен Метрики недействителен. Проверьте правильность и срок действия.",
+  // 403 на этом эндпоинте неоднозначен: и битый токен, и «нет доступа к
+  // счётчику» дают 403 (проверено эмпирикой). Поэтому текст комбинированный —
+  // как в блоке конверсии, не врём про конкретную причину.
+  counter_forbidden:
+    "Метрика отклонила запрос — токен недействителен или у него нет доступа к этому счётчику. Проверьте токен; если он рабочий — запросите доступ у владельца счётчика.",
   counter_not_found: "Счётчик не найден или нет доступа.",
   network_error: "Ошибка соединения с Метрикой. Попробуйте позже.",
   invalid_response: "Неожиданный ответ от Метрики.",
@@ -64,9 +69,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.error(
       `[metrika-sync] siteId=${parsed.data.siteId} error=${result.error} details=${result.details ?? ""}`,
     )
+    const httpStatus =
+      result.error === "auth_failed"
+        ? 401
+        : result.error === "counter_forbidden"
+          ? 403
+          : 502
     return NextResponse.json(
       { error: result.error, message: userMessages[result.error] },
-      { status: result.error === "auth_failed" ? 401 : 502 },
+      { status: httpStatus },
     )
   }
 

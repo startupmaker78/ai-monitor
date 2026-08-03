@@ -5,6 +5,7 @@ import { auth } from "@/auth"
 import { getOwnerSitesByUserId } from "@/lib/site-data"
 import { getSelectedSiteId } from "@/lib/selected-site"
 import { guideHref } from "@/lib/guide-anchors"
+import { Button } from "@/components/ui/button"
 import { MetrikaForm } from "./metrika-form"
 
 export const metadata = {
@@ -28,10 +29,12 @@ export default async function MetrikaSettingsPage({ searchParams }: PageProps) {
           Яндекс.Метрика
         </h2>
         <div className="rounded-lg border bg-card p-8 text-center">
-          <p className="text-muted-foreground">
-            У вас пока нет сайтов. Управление сайтами появится в
-            следующих обновлениях.
+          <p className="mb-4 text-muted-foreground">
+            Сначала добавьте сайт — Метрика подключается к конкретному сайту.
           </p>
+          <Button asChild>
+            <Link href="/dashboard/settings/sites">Добавить сайт</Link>
+          </Button>
         </div>
       </div>
     )

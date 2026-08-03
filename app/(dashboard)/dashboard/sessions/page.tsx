@@ -1,7 +1,9 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { getSessionsForUser } from "@/lib/sessions-data"
 import { getSelectedSiteId } from "@/lib/selected-site"
+import { Button } from "@/components/ui/button"
 import { SessionsTable } from "./sessions-table"
 import { TargetFilter } from "./target-filter"
 
@@ -67,10 +69,12 @@ function EmptyNoSites() {
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold tracking-tight">Сессии</h2>
       <div className="rounded-lg border bg-card p-8 text-center">
-        <p className="text-muted-foreground">
-          У вас пока нет сайтов. Управление сайтами появится в
-          следующих обновлениях.
+        <p className="mb-4 text-muted-foreground">
+          Добавьте сайт, чтобы Вебмонитор начал собирать сессии.
         </p>
+        <Button asChild>
+          <Link href="/dashboard/settings/sites">Добавить сайт</Link>
+        </Button>
       </div>
     </div>
   )
@@ -80,9 +84,12 @@ function EmptyNoSessions() {
   return (
     <div className="rounded-lg border bg-card p-8 text-center">
       <p className="mb-2 text-muted-foreground">Сессий ещё нет.</p>
-      <p className="text-sm text-muted-foreground">
-        Убедитесь, что трекер установлен на ваш сайт.
+      <p className="mb-4 text-sm text-muted-foreground">
+        Убедитесь, что код трекера установлен на ваш сайт.
       </p>
+      <Button asChild variant="outline" size="sm">
+        <Link href="/dashboard/settings/sites">Открыть код трекера</Link>
+      </Button>
     </div>
   )
 }

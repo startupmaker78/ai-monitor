@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { callClaude } from "@/lib/claude-client"
 import { listKeys, getJson } from "@/lib/storage"
+import { prisma } from "@/lib/prisma"
+import { collectSessionsForAnalysis } from "@/lib/session-pre-processor"
+import { getGoalConversionForTarget } from "@/lib/goal-conversion-data"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch {
     /* тела может не быть — только egress */
   }
-  const { url, cfAuth, long, prodpath, preS3, siteId, preMetrika } = (body ?? {}) as {
+  const { url, cfAuth, long, prodpath, preS3, siteId, preMetrika, repro, targetId, doS3, doMetrika } = (body ?? {}) as {
     url?: string
     cfAuth?: string // cf-aig токен (тест CF-гейта)
     long?: boolean // true → ДЛИННАЯ генерация ~60-90с (проверка idle-таймаута прокси)
@@ -61,6 +64,51 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     preS3?: boolean // true → реальные S3-чтения (тот же keepAlive-клиент), ПОТОМ callClaude
     siteId?: string // префикс для preS3: sessions/<siteId>/
     preMetrika?: boolean // true → undici-GET к api-metrika.yandex.net, ПОТОМ callClaude
+    repro?: boolean // true → зеркало runAnalysis: реальные сбор+конверсия ПЕРЕД callClaude
+    targetId?: string // для repro (default — staging /)
+    doS3?: boolean // repro: делать реальный сбор сессий (default true)
+    doMetrika?: boolean // repro: делать реальную конверсию Метрики (default true)
+  }
+
+  // ЗЕРКАЛО runAnalysis: реальные пред-шаги (сбор сессий + конверсия Метрики)
+  // теми же функциями и в том же порядке, ПОТОМ callClaude(maxTokens 8000).
+  // Изолируем, что именно ломает следующий connect: сбор, Метрика или их сумма.
+  if (repro) {
+    const tid = targetId ?? "cmsen08yg00002w3ciprsufdf" // staging /
+    const t = await prisma.analysisTarget.findUnique({
+      where: { id: tid },
+      select: { site: { select: { owner: { select: { userId: true } } } } },
+    })
+    const uid = t?.site.owner.userId
+    const steps: Record<string, unknown> = {}
+    if (doS3 !== false) {
+      const t0 = Date.now()
+      try {
+        const c = await collectSessionsForAnalysis(tid, { limit: 50 })
+        steps.collect = { ms: Date.now() - t0, summaries: c.summaries.length }
+      } catch (e) {
+        steps.collect = { ms: Date.now() - t0, error: (e as Error).message }
+      }
+    }
+    if (doMetrika !== false && uid) {
+      const t0 = Date.now()
+      try {
+        await getGoalConversionForTarget(uid, tid)
+        steps.metrika = { ms: Date.now() - t0, ok: true }
+      } catch (e) {
+        steps.metrika = { ms: Date.now() - t0, error: (e as Error).message }
+      }
+    }
+    const t1 = Date.now()
+    const cc = await callClaude({
+      system: "Ты аналитик веб-сессий.",
+      messages: [{ role: "user", content: "Проанализируй.\n" + "данные сессии. ".repeat(600) }],
+      maxTokens: 8000,
+    })
+    const ccOut = cc.ok
+      ? { ok: true, ms: Date.now() - t1, textLen: cc.text.length }
+      : { ok: false, ms: Date.now() - t1, error: cc.error, details: redact(cc.details ?? "") }
+    return NextResponse.json({ egress, steps, callClaude: ccOut })
   }
 
   // Воспроизведение: сетевой вызов Метрики (последний перед callClaude в

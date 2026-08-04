@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { EngagementInfo } from "./engagement-info"
 
 // Строка вовлечённости одной цели (форма из lib/dashboard-data.ts).
 type EngagementRow = {
@@ -57,7 +58,10 @@ export function EngagementBlock({
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>Вовлечённость страниц</CardTitle>
+          <div className="flex items-center gap-1.5">
+            <CardTitle>Вовлечённость страниц</CardTitle>
+            <EngagementInfo />
+          </div>
           <Legend />
         </div>
         <CardDescription>

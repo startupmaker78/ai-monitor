@@ -24,7 +24,10 @@ export type RunAnalysisError =
   | "collect_timeout"
   | "monthly_limit"
   | "race_condition"
-  | "provider_denied"
+  | "provider_denied" // CF security policy / прочий 403 провайдера
+  | "gateway_auth_failed" // 401 самого CF-шлюза (cf-aig токен)
+  | "provider_key_invalid" // 401 провайдера (ключ OpenRouter отклонён)
+  | "provider_billing" // 402 (баланс/кредиты)
   | "relay_unavailable"
   | "claude_retriable"
   | "claude_invalid"
@@ -349,21 +352,92 @@ export async function runAnalysis(
         analysisId: analysis.id,
       }
     }
-    if (claudeResult.error === "access_denied") {
-      // Провайдер/шлюз отклонил (403): гео/политика/ключ. НЕ ретраибельно.
-      console.error("[analysis-runner] provider denied request (403)", {
+    // 403/401/402 от шлюза/провайдера — под-причины разведены по реальным
+    // телам (не склеиваем в один текст). Все НЕ ретраибельны — нужна правка
+    // конфигурации/баланса, не повтор. Санитизированную суть ответа
+    // (claudeResult.details) кладём и в лог, и в сообщение — экономит разбор.
+    const provider = claudeResult.details ?? ""
+    if (claudeResult.error === "gateway_blocked") {
+      console.error("[analysis-runner] AI gateway blocked (CF security policy)", {
         analysisId: analysis.id,
         targetId,
         errorType: claudeResult.error,
-        errorCategory: "provider_denied",
-        details: claudeResult.details,
+        errorCategory: "gateway_blocked",
+        details: provider,
       })
       await markFailed(analysis.id, targetId)
       return {
         ok: false,
         error: "provider_denied",
-        message:
-          "Провайдер отклонил запрос (гео-ограничение / политика / ключ). Повтор не поможет — нужна проверка конфигурации AI-шлюза.",
+        message: `AI-шлюз (Cloudflare) отклонил запрос политикой безопасности — вероятно, блокировка исходящего IP. Повтор не поможет, нужна проверка правил CF. Ответ шлюза: ${provider}`,
+        analysisId: analysis.id,
+      }
+    }
+    if (claudeResult.error === "access_denied") {
+      // Прочий 403 (не CF security policy). Причину НЕ приписываем — суть в
+      // details.
+      console.error("[analysis-runner] provider denied request (403)", {
+        analysisId: analysis.id,
+        targetId,
+        errorType: claudeResult.error,
+        errorCategory: "provider_denied",
+        details: provider,
+      })
+      await markFailed(analysis.id, targetId)
+      return {
+        ok: false,
+        error: "provider_denied",
+        message: `AI-провайдер отклонил запрос (403). Повтор не поможет — нужна проверка конфигурации AI-шлюза. Ответ: ${provider}`,
+        analysisId: analysis.id,
+      }
+    }
+    if (claudeResult.error === "gateway_auth_failed") {
+      console.error("[analysis-runner] AI gateway auth failed (cf-aig)", {
+        analysisId: analysis.id,
+        targetId,
+        errorType: claudeResult.error,
+        errorCategory: "gateway_auth_failed",
+        details: provider,
+      })
+      await markFailed(analysis.id, targetId)
+      return {
+        ok: false,
+        error: "gateway_auth_failed",
+        message: `AI-шлюз не принял авторизацию шлюза (cf-aig). Проверьте AI_GATEWAY_AUTH. Ответ: ${provider}`,
+        analysisId: analysis.id,
+      }
+    }
+    if (claudeResult.error === "auth_failed") {
+      // 401 ПРОВАЙДЕРА — ключ отклонён. Раньше уходило в claude_retriable
+      // (ретраибельно) — это было неверно, повтор ключ не чинит.
+      console.error("[analysis-runner] provider key rejected (401)", {
+        analysisId: analysis.id,
+        targetId,
+        errorType: claudeResult.error,
+        errorCategory: "provider_key_invalid",
+        details: provider,
+      })
+      await markFailed(analysis.id, targetId)
+      return {
+        ok: false,
+        error: "provider_key_invalid",
+        message: `AI-провайдер отклонил ключ доступа (401). Проверьте OPENROUTER_API_KEY. Ответ: ${provider}`,
+        analysisId: analysis.id,
+      }
+    }
+    if (claudeResult.error === "insufficient_credits") {
+      console.error("[analysis-runner] provider out of credits (402)", {
+        analysisId: analysis.id,
+        targetId,
+        errorType: claudeResult.error,
+        errorCategory: "provider_billing",
+        details: provider,
+      })
+      await markFailed(analysis.id, targetId)
+      return {
+        ok: false,
+        error: "provider_billing",
+        message: `Исчерпан баланс/лимит AI-провайдера (402). Пополните аккаунт. Ответ: ${provider}`,
         analysisId: analysis.id,
       }
     }

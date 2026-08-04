@@ -32,15 +32,62 @@ export type ClaudeResult =
   | {
       ok: false
       error:
-        | "auth_failed"
-        | "access_denied"
+        | "auth_failed" // 401 провайдера: ключ OpenRouter отклонён
+        | "gateway_auth_failed" // 401 самого CF-шлюза: cf-aig токен
+        | "gateway_blocked" // 403 CF security policy (Access denied by security policy)
+        | "access_denied" // прочий 403 — причину НЕ приписываем
+        | "insufficient_credits" // 402 — баланс/кредиты провайдера
         | "rate_limit"
         | "relay_unavailable"
         | "api_error"
         | "network_error"
         | "invalid_response"
+      // Санитизированная суть ответа провайдера/шлюза (без ключей/URL) — в лог
+      // и в клиентское сообщение. Различаем под-причины по РЕАЛЬНЫМ телам:
+      // CF policy 403 «Access denied by security policy»; CF auth 401
+      // AiGatewayError/2009; ключ OR 401 «User not found»; кредиты 402.
       details?: string
     }
+
+// Вычищает всё, что похоже на секреты/внутренние URL, из текста ответа
+// провайдера — чтобы санитизированная суть могла безопасно уйти и в лог, и в
+// клиентское сообщение. Тела ошибок обычно НЕ эхают Authorization, но чистим
+// как defense-in-depth (ключ OR sk-…, cf-aig Bearer, любой https-URL шлюза).
+function sanitizeProviderText(s: string): string {
+  return s
+    .replace(/sk-[a-z]+-[A-Za-z0-9._-]+/gi, "[ключ]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer […]")
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+// Достаёт короткую СУТЬ из тела ошибки: поля error (строка) / error.message /
+// error[].message / message у OpenRouter и CF; иначе — сырое тело. Санитизирует
+// и обрезает. Возвращает «HTTP <status>: <суть>» для лога и (через маппинг) для
+// сообщения — самая диагностичная строка ответа, без ключей/URL.
+function providerReason(body: string, status: number): string {
+  let reason = ""
+  try {
+    const j = JSON.parse(body) as {
+      error?: unknown
+      message?: unknown
+    }
+    if (typeof j.error === "string") reason = j.error
+    else if (j.error && typeof j.error === "object") {
+      const e = j.error as { message?: unknown }
+      const arr = j.error as Array<{ message?: unknown }>
+      if (typeof e.message === "string") reason = e.message
+      else if (Array.isArray(j.error) && typeof arr[0]?.message === "string")
+        reason = arr[0].message as string
+    }
+    if (!reason && typeof j.message === "string") reason = j.message
+  } catch {
+    // тело не JSON — используем как есть (санитизированным)
+  }
+  if (!reason) reason = body
+  return `HTTP ${status}: ${sanitizeProviderText(reason).slice(0, 160)}`
+}
 
 // Native fetch, не SDK — консистентно с lib/metrika-client.ts.
 //
@@ -111,17 +158,37 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
   }
 
   if (response.status === 401) {
-    return { ok: false, error: "auth_failed" }
+    // Различаем 401 САМОГО шлюза (cf-aig токен, формат AiGatewayError/2009 —
+    // проверено тестом «без cf-aig») от 401 ПРОВАЙДЕРА (ключ OpenRouter
+    // отклонён, «User not found» — проверено тестом с невалидным ключом).
+    const text = await response.text().catch(() => "")
+    const isGatewayAuth = /AiGatewayError/i.test(text) || /"code"\s*:\s*2009/.test(text)
+    return {
+      ok: false,
+      error: isGatewayAuth ? "gateway_auth_failed" : "auth_failed",
+      details: providerReason(text, 401),
+    }
   }
-  if (response.status === 403) {
-    // Гео/политика провайдера ЛИБО неверный cf-aig-токен шлюза. Повтор НЕ
-    // поможет — нужна проверка конфигурации (не rate-limit). Отдельная
-    // категория, чтобы 403 не маскировался под «временно недоступен».
+  if (response.status === 402) {
+    // Payment Required — стандартный код исчерпанного баланса/кредитов.
     const text = await response.text().catch(() => "")
     return {
       ok: false,
-      error: "access_denied",
-      details: `HTTP 403: ${text.slice(0, 500)}`,
+      error: "insufficient_credits",
+      details: providerReason(text, 402),
+    }
+  }
+  if (response.status === 403) {
+    // Различаем security-policy блок CF-эджа (реальное тело «Access denied by
+    // security policy» — так режет РФ-IP контейнера) от прочих 403. Повтор НЕ
+    // поможет — нужна проверка конфигурации. Причину (гео/иное) прочему 403 НЕ
+    // приписываем — тела не видели.
+    const text = await response.text().catch(() => "")
+    const isSecurityPolicy = /access denied by security policy/i.test(text)
+    return {
+      ok: false,
+      error: isSecurityPolicy ? "gateway_blocked" : "access_denied",
+      details: providerReason(text, 403),
     }
   }
   if (response.status === 429) {
@@ -134,7 +201,7 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
     return {
       ok: false,
       error: "relay_unavailable",
-      details: `HTTP ${response.status}: ${text.slice(0, 500)}`,
+      details: providerReason(text, response.status),
     }
   }
   if (!response.ok) {
@@ -142,7 +209,7 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
     return {
       ok: false,
       error: "api_error",
-      details: `HTTP ${response.status}: ${text.slice(0, 500)}`,
+      details: providerReason(text, response.status),
     }
   }
 

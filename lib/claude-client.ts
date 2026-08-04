@@ -1,3 +1,5 @@
+import { Agent, fetch as undiciFetch } from "undici"
+
 // Прокси через OpenRouter, потому что api.anthropic.com отвечает 403
 // "Request not allowed" на запросы с РФ-IP (наш staging в YC ru-central1).
 // OpenRouter отдаёт OpenAI-совместимый chat completions API; модель
@@ -12,6 +14,20 @@ const DEFAULT_MODEL = "anthropic/claude-opus-4-7"
 const DEFAULT_MAX_TOKENS = 4096
 const REFERER_URL = "https://staging.xn--90abjntggcss.xn--p1ai" // Punycode for staging.вебмонитор.рф (проверено node: toUnicode → вебмонитор.рф)
 const APP_TITLE = "Webmonitor"
+
+// СВЕЖИЙ СОКЕТ НА ВЫЗОВ (DECISIONS 2026-08-05): диагностика показала — тяжёлые
+// (long-running) запросы к Fly-прокси интермиттентно падают connect-timeout'ом,
+// лёгкие — никогда. Сильная гипотеза: undici переиспользует keep-alive
+// соединение, которое Fly уже закрыл по idle → следующий connect на РФ→fra
+// теряет SYN. keepAliveTimeout=1мс фактически отключает переиспользование:
+// сокет закрывается сразу после ответа, каждый вызов идёт по свежему. Держим
+// СВОЙ dispatcher (не глобальный) — метрика/прочие fetch не трогаем. Своя
+// undici (не встроенная в Node) — Agent и fetch должны быть из одного пакета.
+const AI_DISPATCHER = new Agent({
+  keepAliveTimeout: 1,
+  keepAliveMaxTimeout: 1,
+  pipelining: 0,
+})
 
 export type ClaudeMessage = {
   role: "user" | "assistant"
@@ -135,12 +151,14 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
     headers["X-Proxy-Auth"] = proxyAuth
   }
 
-  let response: Response
+  // undici-fetch со СВОИМ dispatcher без keep-alive (свежий сокет на вызов).
+  let response: Awaited<ReturnType<typeof undiciFetch>>
   try {
-    response = await fetch(apiUrl, {
+    response = await undiciFetch(apiUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
+      dispatcher: AI_DISPATCHER,
     })
   } catch (err) {
     const e = err as Error & { code?: string; cause?: unknown }

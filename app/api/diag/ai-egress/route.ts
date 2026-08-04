@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { callClaude } from "@/lib/claude-client"
+import { listKeys, getJson } from "@/lib/storage"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -52,11 +53,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch {
     /* тела может не быть — только egress */
   }
-  const { url, cfAuth, long, prodpath } = (body ?? {}) as {
+  const { url, cfAuth, long, prodpath, preS3, siteId } = (body ?? {}) as {
     url?: string
     cfAuth?: string // cf-aig токен (тест CF-гейта)
     long?: boolean // true → ДЛИННАЯ генерация ~60-90с (проверка idle-таймаута прокси)
     prodpath?: boolean // true → воспроизвести БОЕВОЙ путь (env AI_API_URL + callClaude)
+    preS3?: boolean // true → реальные S3-чтения (тот же keepAlive-клиент), ПОТОМ callClaude
+    siteId?: string // префикс для preS3: sessions/<siteId>/
+  }
+
+  // Воспроизведение: S3-активность (как сбор сессий) ПЕРЕД callClaude. Если
+  // после S3 callClaude падает ConnectTimeout — виновник контекста = S3-клиент
+  // (keepAlive https.Agent), а не транспорт.
+  if (preS3) {
+    const sid = siteId ?? "cms6sbelh00002v3cok3f1ogz" // staging по умолчанию
+    const s3: { keysFound?: number; read?: number; error?: string } = {}
+    const t0 = Date.now()
+    try {
+      const keys = await listKeys(`sessions/${sid}/`)
+      s3.keysFound = keys.length
+      let read = 0
+      for (const k of keys.slice(0, 10)) {
+        try { await getJson(k); read++ } catch { /* пропускаем битые */ }
+      }
+      s3.read = read
+    } catch (e) {
+      s3.error = (e as Error).message
+    }
+    const s3ms = Date.now() - t0
+    // теперь — тот же callClaude, что и в runAnalysis
+    const t1 = Date.now()
+    const cc = await callClaude({ system: "Ты аналитик.", messages: [{ role: "user", content: "Проанализируй сессию. ".repeat(600) }], maxTokens: 50 })
+    const ccOut = cc.ok
+      ? { ok: true, ms: Date.now() - t1, textLen: cc.text.length }
+      : { ok: false, ms: Date.now() - t1, error: cc.error, details: redact(cc.details ?? "") }
+    return NextResponse.json({ egress, s3: { ...s3, ms: s3ms }, callClaude: ccOut })
   }
 
   // Воспроизведение боевого пути: две пробы из одного окружения контейнера.

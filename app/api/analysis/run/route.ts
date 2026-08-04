@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { auth } from "@/auth"
+import { prisma } from "@/lib/prisma"
 import {
   runAnalysis,
   type RunAnalysisError,
@@ -51,6 +52,45 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(
       { error: "bad_request", message: "Не указан targetId" },
       { status: 400 },
+    )
+  }
+
+  // Гейт «завершённая страница» — ДО вызова runAnalysis (analysis-runner —
+  // Path M, не трогаем; ставим отбой в обёртке). Завершённая = уже есть
+  // DONE-анализ И собрано >= бюджета. Такая страница замерла: новых сессий
+  // не будет (оба гейта сбора закрыты), повтор прогнал бы ТЕ ЖЕ данные и
+  // сжёг бы слот месячного лимита. Единственная точка входа в runAnalysis —
+  // этот роут (проверено), поэтому гейт здесь неминуем.
+  // Цель ищем в scope владельца и НЕ архивную: если не найдена (чужая /
+  // архивная / несуществующая) — не отбиваем тут, пусть runAnalysis отдаст
+  // свой target_not_found (не плодим утечку существования и дубль логики).
+  const gateTarget = await prisma.analysisTarget.findFirst({
+    where: {
+      id: parsed.data.targetId,
+      archivedAt: null,
+      site: { ownerId: session.user.id },
+    },
+    select: {
+      sessionsCollected: true,
+      sessionsBudget: true,
+      analyses: { where: { status: "DONE" }, select: { id: true }, take: 1 },
+    },
+  })
+  if (
+    gateTarget &&
+    gateTarget.analyses.length > 0 &&
+    gateTarget.sessionsCollected >= gateTarget.sessionsBudget
+  ) {
+    return NextResponse.json(
+      {
+        error: "already_completed",
+        message:
+          "Сбор по этой странице завершён — новых сессий больше не будет. " +
+          "Повторный анализ прогнал бы те же данные и потратил бы слот из " +
+          "месячного лимита. Откройте рекомендации по странице или заведите " +
+          "новую страницу.",
+      },
+      { status: 409 },
     )
   }
 

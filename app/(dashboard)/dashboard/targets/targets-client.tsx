@@ -627,12 +627,26 @@ function TargetCard({
           </div>
           {!archived && (
             <div className="flex flex-col items-end gap-2">
-              <AnalyzeButton
-                target={target}
-                analyzing={analyzing}
-                onAnalyze={handleAnalyze}
-                minSessionsBudget={minSessionsBudget}
-              />
+              {/* Завершённая (проанализирована + полный бюджет) замерла: новых
+                  сессий не будет, повтор дал бы тот же результат и сжёг слот.
+                  Поэтому вместо «Запустить анализ» — ссылка на её рекомендации
+                  (серверный гейт в /api/analysis/run дублирует запрет). */}
+              {isCompleted(target) ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link
+                    href={`/dashboard/recommendations?targetId=${target.id}`}
+                  >
+                    Смотреть рекомендации
+                  </Link>
+                </Button>
+              ) : (
+                <AnalyzeButton
+                  target={target}
+                  analyzing={analyzing}
+                  onAnalyze={handleAnalyze}
+                  minSessionsBudget={minSessionsBudget}
+                />
+              )}
               <ArchiveControl
                 target={target}
                 analyzing={analyzing}

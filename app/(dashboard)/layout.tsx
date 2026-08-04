@@ -56,8 +56,12 @@ export default async function DashboardLayout({
     <SidebarProvider>
       <Sidebar collapsible="icon">
         <SidebarHeader>
-          <div className="flex items-center gap-2 px-2 py-1.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary font-semibold text-primary-foreground">
+          {/* В icon-режиме убираем внутренний px-2 и центрируем: иначе
+              SidebarHeader p-2 (8px) + этот px-2 (8px) = 16px паддингов на
+              48px рейле оставляли 16px под 32px квадрат → обрезка. Теперь
+              квадрат h-8 w-8 центрирован с симметричными ~8px. */}
+          <div className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary font-semibold text-primary-foreground">
               В
             </div>
             <span className="font-semibold group-data-[collapsible=icon]:hidden">

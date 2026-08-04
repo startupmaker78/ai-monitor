@@ -45,7 +45,7 @@ export function FreshRecommendations({ items }: { items: FreshRec[] }) {
           >
             <p className="font-medium">{r.title}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Цель: {r.targetName}
+              Страница: {r.targetName}
             </p>
           </Link>
         ))}

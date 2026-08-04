@@ -26,7 +26,7 @@ export function TargetSelector({ targets, selectedId }: Props) {
       value={selectedId}
       onChange={handleChange}
       className="rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-accent"
-      aria-label="Выбрать цель"
+      aria-label="Выбрать страницу"
     >
       {targets.map((t) => (
         <option key={t.id} value={t.id}>

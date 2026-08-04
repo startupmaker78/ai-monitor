@@ -53,7 +53,7 @@ export function RecommendationsClient({ analyses }: Props) {
       <Card>
         <CardContent className="py-12 text-center">
           <p className="text-muted-foreground">
-            По этой цели пока нет рекомендаций.
+            По этой странице пока нет рекомендаций.
           </p>
         </CardContent>
       </Card>
@@ -87,7 +87,7 @@ export function RecommendationsClient({ analyses }: Props) {
               <TooltipContent className="max-w-xs text-xs font-normal leading-relaxed">
                 Анализируются только сессии с действиями посетителя (клики,
                 скролл, формы). Пустые — bounce и пассивные просмотры —
-                пропускаются, поэтому число меньше, чем «собрано» у цели.
+                пропускаются, поэтому число меньше, чем «собрано» у страницы.
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

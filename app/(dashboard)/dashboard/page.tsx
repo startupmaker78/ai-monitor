@@ -162,8 +162,8 @@ function OnboardingBanner({
 
   const readyTitle = (name: string | null, count: number) =>
     count === 1 && name
-      ? `Цель «${name}» готова к анализу`
-      : `${count} ${count < 5 ? "цели" : "целей"} готовы к анализу`
+      ? `Страница «${name}» готова к анализу`
+      : `${count} ${count < 5 ? "страницы" : "страниц"} готовы к анализу`
 
   if (!trackerActive || !metrikaConfigured) {
     title = "Проверьте подключение сайта"
@@ -172,11 +172,11 @@ function OnboardingBanner({
     href = "/dashboard/settings/sites"
     cta = "Проверить подключение"
   } else if (targetsActive === 0) {
-    title = "Задайте первую цель"
+    title = "Добавьте первую страницу"
     text =
-      "Цель — это действие, к которому вы ведёте посетителей. По ней Вебмонитор соберёт сессии и найдёт, что мешает конверсии."
+      "Укажите страницу, к которой вы ведёте посетителей. По ней Вебмонитор соберёт сессии и найдёт, что мешает конверсии."
     href = "/dashboard/targets"
-    cta = "Задать цель"
+    cta = "Добавить страницу"
   } else if (analysesTotal === 0 && readyToAnalyze.count > 0) {
     // Новичок: первый анализ.
     title = readyTitle(readyToAnalyze.firstName, readyToAnalyze.count)

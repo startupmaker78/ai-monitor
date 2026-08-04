@@ -40,14 +40,14 @@ export function TargetsList({ targets, readyTargetIds = [] }: TargetsListProps) 
       <Card>
         <CardContent className="py-8 text-center">
           <p className="text-muted-foreground">
-            У вас пока нет настроенных целей анализа. Добавьте первую цель —
-            обычно это главная страница или /pricing.
+            У вас пока нет добавленных страниц. Добавьте первую — обычно это
+            главная или /pricing.
           </p>
           <Link
             href="/dashboard/targets"
             className="mt-4 inline-block text-primary hover:underline"
           >
-            Перейти к управлению целями →
+            Перейти к управлению страницами →
           </Link>
         </CardContent>
       </Card>
@@ -58,18 +58,18 @@ export function TargetsList({ targets, readyTargetIds = [] }: TargetsListProps) 
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
-          <CardTitle>Цели анализа</CardTitle>
+          <CardTitle>Страницы для анализа</CardTitle>
           <Link
             href="/dashboard/targets"
             className="shrink-0 text-sm text-primary hover:underline"
           >
-            Управление целями →
+            Управление страницами →
           </Link>
         </div>
         <CardDescription>
           AI анализирует поведение посетителей на выбранных страницах. Ниже —
-          прогресс сбора сессий по каждой цели. Запуск анализа и управление —
-          в разделе «Управление целями».
+          прогресс сбора сессий по каждой странице. Запуск анализа и управление
+          — в разделе «Страницы».
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

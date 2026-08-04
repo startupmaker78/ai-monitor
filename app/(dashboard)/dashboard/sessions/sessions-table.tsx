@@ -98,7 +98,7 @@ export function SessionsTable({
             <th className="px-4 py-3 font-medium">Длительность</th>
             <th className="px-4 py-3 font-medium">Активность</th>
             {showSite && <th className="px-4 py-3 font-medium">Сайт</th>}
-            {showTarget && <th className="px-4 py-3 font-medium">Цель</th>}
+            {showTarget && <th className="px-4 py-3 font-medium">Страница</th>}
             <th className="px-4 py-3 font-medium">Посетитель</th>
             <th className="px-4 py-3 font-medium text-right">Запись</th>
           </tr>

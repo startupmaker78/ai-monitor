@@ -57,7 +57,7 @@ function CreateButton() {
   const { pending } = useFormStatus()
   return (
     <Button type="submit" disabled={pending}>
-      {pending ? "Создание..." : "Создать цель"}
+      {pending ? "Добавление..." : "Добавить страницу"}
     </Button>
   )
 }
@@ -94,7 +94,7 @@ export function TargetsClient(props: Props) {
         <CardHeader>
           <CardTitle className="text-base">Тариф: {props.tier.name}</CardTitle>
           <CardDescription>
-            Целей: {props.activeTargets.length} / {props.tier.targetsLimit}
+            Страниц: {props.activeTargets.length} / {props.tier.targetsLimit}
             {" • "}
             Сессий аллоцировано: {props.sessionsAllocated} /{" "}
             {props.tier.sessionsLimit}
@@ -106,17 +106,17 @@ export function TargetsClient(props: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Добавить цель</CardTitle>
+          <CardTitle>Добавить страницу</CardTitle>
           <CardDescription>
-            Цель — это URL страницы вашего сайта, для которой Вебмонитор
-            соберёт сессии и запустит AI-анализ.
+            Укажите URL страницы вашего сайта — по ней Вебмонитор соберёт
+            сессии и запустит AI-анализ.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {!canCreate && (
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               {props.targetsRemaining <= 0
-                ? "Достигнут лимит целей вашего тарифа. Архивируйте неиспользуемые."
+                ? "Достигнут лимит страниц вашего тарифа. Архивируйте неиспользуемые."
                 : `Недостаточно свободных сессий (нужно минимум ${props.minSessionsBudget}).`}
             </div>
           )}
@@ -189,14 +189,14 @@ export function TargetsClient(props: Props) {
                 />
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Чтобы измерять конверсию по цели,{" "}
+                  Чтобы измерять конверсию по целевому действию,{" "}
                   <Link
                     href="/dashboard/settings/metrika"
                     className="font-medium underline underline-offset-2"
                   >
                     подключите Яндекс.Метрику
                   </Link>
-                  . Без неё цель анализируется по поведению.
+                  . Без неё страница анализируется по поведению.
                 </p>
               )}
               {!props.metrikaConfigured && (
@@ -230,11 +230,11 @@ export function TargetsClient(props: Props) {
 
       <div>
         <h3 className="mb-3 text-lg font-semibold">
-          Активные цели ({props.activeTargets.length})
+          Активные страницы ({props.activeTargets.length})
         </h3>
         {props.activeTargets.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Нет активных целей. Добавьте первую через форму выше.
+            Нет активных страниц. Добавьте первую через форму выше.
           </p>
         ) : (
           <div className="space-y-3">
@@ -276,7 +276,7 @@ export function TargetsClient(props: Props) {
 
 const STATUS_LABELS: Record<string, string> = {
   ACTIVE: "Сбор сессий",
-  READY: "Цель достигнута",
+  READY: "Сбор завершён",
   ANALYZING: "Анализируется",
   COMPLETED: "Анализ завершён",
   ARCHIVED: "Архив",
@@ -560,7 +560,7 @@ function TargetCard({
               {notice?.kind === "success" && (
                 <>
                   Найдено {notice.recommendationsCount}{" "}
-                  {pluralRec(notice.recommendationsCount)} по цели «
+                  {pluralRec(notice.recommendationsCount)} по странице «
                   {target.name ?? target.url}».
                 </>
               )}

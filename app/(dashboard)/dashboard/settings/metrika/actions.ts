@@ -76,7 +76,7 @@ export async function saveMetrikaSettings(
     return {
       ok: true,
       status: "connected",
-      message: `Подключено, счётчик отвечает. Целей найдено: ${verify.goalCount}. Откройте дашборд, чтобы запустить синхронизацию.`,
+      message: `Подключено, счётчик отвечает. Целевых действий найдено: ${verify.goalCount}. Откройте дашборд, чтобы запустить синхронизацию.`,
     }
   }
 

@@ -68,7 +68,7 @@ export function UsageWidget({ usage, tierName, tierLimits }: UsageWidgetProps) {
       <CardContent className="space-y-4">
         <UsageItem
           icon={Target}
-          label="Цели анализа"
+          label="Страницы"
           used={usage.targetsUsed}
           limit={tierLimits.targetsLimit}
           remaining={usage.targetsRemaining}

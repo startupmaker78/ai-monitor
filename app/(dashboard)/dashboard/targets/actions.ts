@@ -83,7 +83,7 @@ export async function createTarget(
   if (activeTargets.length >= tier.targetsLimit) {
     return {
       ok: false,
-      error: `Достигнут лимит целей вашего тарифа (${tier.targetsLimit}). Архивируйте неиспользуемые цели или повысьте тариф.`,
+      error: `Достигнут лимит страниц вашего тарифа (${tier.targetsLimit}). Архивируйте неиспользуемые страницы или повысьте тариф.`,
     }
   }
 
@@ -99,7 +99,7 @@ export async function createTarget(
   if (isDuplicate) {
     return {
       ok: false,
-      error: "Цель с таким URL уже существует. Архивируйте её сначала.",
+      error: "Страница с таким URL уже добавлена. Архивируйте её сначала.",
       field: "url",
     }
   }
@@ -113,7 +113,7 @@ export async function createTarget(
   if (parsed.data.sessionsBudget > sessionsRemaining) {
     return {
       ok: false,
-      error: `Свободно ${sessionsRemaining} сессий из ${tier.sessionsLimit}. Уменьшите бюджет цели или архивируйте другие.`,
+      error: `Свободно ${sessionsRemaining} сессий из ${tier.sessionsLimit}. Уменьшите бюджет страницы или архивируйте другие.`,
       field: "sessionsBudget",
     }
   }
@@ -161,7 +161,7 @@ export async function createTarget(
 
   return {
     ok: true,
-    message: "Цель создана. Сбор сессий начнётся автоматически.",
+    message: "Страница добавлена. Сбор сессий начнётся автоматически.",
   }
 }
 
@@ -181,7 +181,7 @@ function goalErrorMessage(
     case "not_configured":
       return "Сначала подключите Яндекс.Метрику в Настройках → Метрика."
     case "goal_not_found":
-      return "Цель не найдена в счётчике Метрики. Обновите список и выберите заново."
+      return "Целевое действие не найдено в счётчике Метрики. Обновите список и выберите заново."
     case "auth_failed":
       return "Токен Яндекс.Метрики истёк или недействителен. Обновите его в Настройках → Метрика."
     case "counter_forbidden":
@@ -234,10 +234,10 @@ export async function setTargetGoal(
       analyses: { where: { status: "DONE" }, select: { id: true }, take: 1 },
     },
   })
-  if (!target) return { ok: false, error: "Цель не найдена" }
+  if (!target) return { ok: false, error: "Страница не найдена" }
 
   const owns = await validateSiteOwnership(target.siteId, session.user.id)
-  if (!owns) return { ok: false, error: "Цель не найдена" }
+  if (!owns) return { ok: false, error: "Страница не найдена" }
 
   // Иммутабельность: менять/сбрасывать УЖЕ ЗАДАННОЕ действие после DONE-анализа
   // нельзя (прежние рекомендации противоречили бы новой цифре). ПЕРВАЯ
@@ -312,13 +312,13 @@ export async function archiveTarget(
       archivedAt: true,
     },
   })
-  if (!target) return { ok: false, error: "Цель не найдена" }
-  if (target.archivedAt) return { ok: false, error: "Цель уже архивирована" }
+  if (!target) return { ok: false, error: "Страница не найдена" }
+  if (target.archivedAt) return { ok: false, error: "Страница уже архивирована" }
   if (target.status === "ANALYZING") {
     return {
       ok: false,
       error:
-        "Нельзя архивировать цель пока идёт AI-анализ. Дождитесь завершения.",
+        "Нельзя архивировать страницу пока идёт AI-анализ. Дождитесь завершения.",
     }
   }
   if (
@@ -328,12 +328,12 @@ export async function archiveTarget(
     return {
       ok: false,
       error:
-        "Сначала запустите анализ собранных сессий. Нельзя архивировать цель с собранными данными до AI-анализа.",
+        "Сначала запустите анализ собранных сессий. Нельзя архивировать страницу с собранными данными до AI-анализа.",
     }
   }
 
   const owns = await validateSiteOwnership(target.siteId, session.user.id)
-  if (!owns) return { ok: false, error: "Цель не найдена" }
+  if (!owns) return { ok: false, error: "Страница не найдена" }
 
   // DECISIONS.md "2026-05-05 — Hotfix 5: финальная модель архивации".
   // Status НЕ перезаписываем. Если был ACTIVE с collected=0 — остаётся
@@ -350,6 +350,6 @@ export async function archiveTarget(
   revalidatePath("/dashboard/targets")
   revalidatePath("/dashboard")
 
-  return { ok: true, message: "Цель архивирована" }
+  return { ok: true, message: "Страница архивирована" }
 }
 

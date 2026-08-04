@@ -43,7 +43,7 @@ export default async function SessionPlayerPage({ params }: PageProps) {
           посетитель …{owned.ipHash.slice(-8)}
           {owned.analysisTarget && (
             <>
-              {" · "}цель:{" "}
+              {" · "}страница:{" "}
               <span className="font-mono text-xs">
                 {owned.analysisTarget.url}
               </span>

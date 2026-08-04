@@ -32,14 +32,14 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
         <Card>
           <CardContent className="space-y-4 py-12 text-center">
             <p className="text-muted-foreground">
-              Пока нет готовых рекомендаций. Задайте цель, соберите по ней
+              Пока нет готовых рекомендаций. Добавьте страницу, соберите по ней
               сессии и запустите анализ.
             </p>
             <Link
               href="/dashboard/targets"
               className="inline-block font-medium text-primary underline underline-offset-2"
             >
-              Перейти к целям
+              Перейти к страницам
             </Link>
           </CardContent>
         </Card>
@@ -69,7 +69,7 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-muted-foreground">
-              Цель не найдена или удалена. Выберите другую цель.
+              Страница не найдена или удалена. Выберите другую.
             </p>
           </CardContent>
         </Card>
@@ -86,7 +86,7 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
 
       <div>
         <p className="text-sm text-muted-foreground">
-          Цель:{" "}
+          Страница:{" "}
           <span className="font-medium text-foreground">
             {data.target.name ?? data.target.url}
           </span>

@@ -7,7 +7,7 @@ import { getMinSessionsBudget } from "@/lib/config"
 import { Button } from "@/components/ui/button"
 import { TargetsClient } from "./targets-client"
 
-export const metadata = { title: "Цели анализа — Вебмонитор" }
+export const metadata = { title: "Страницы — Вебмонитор" }
 
 type PageProps = {
   searchParams: { site?: string }
@@ -24,11 +24,11 @@ export default async function TargetsPage({ searchParams }: PageProps) {
     return (
       <div className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight">
-          Цели анализа
+          Страницы
         </h2>
         <div className="rounded-lg border bg-card p-8 text-center">
           <p className="mb-4 text-muted-foreground">
-            Добавьте сайт, чтобы задавать цели анализа.
+            Добавьте сайт, чтобы добавлять страницы для анализа.
           </p>
           <Button asChild>
             <Link href="/dashboard/settings/sites">Добавить сайт</Link>
@@ -42,7 +42,7 @@ export default async function TargetsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-2xl font-semibold tracking-tight">
-          Цели анализа
+          Страницы
         </h2>
       </div>
 

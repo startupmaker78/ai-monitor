@@ -11,7 +11,7 @@ import type { TargetConversion } from "@/lib/goal-conversion-data"
 // как «у вас 0».
 const ERROR_TEXT: Record<string, string> = {
   goal_deleted:
-    "Целевое действие удалено в Яндекс.Метрике. Выберите другое в настройках цели.",
+    "Целевое действие удалено в Яндекс.Метрике. Выберите другое в настройках страницы.",
   goal_archived:
     "Цель архивирована или удалена в Яндекс.Метрике — данные по ней больше не собираются. Выберите другое целевое действие или восстановите цель в Метрике.",
   rate_limited:
@@ -41,7 +41,7 @@ function fmtDate(s: string): string {
 
 function periodLabel(p: { from: string; to: string; widened: boolean }): string {
   if (p.widened) {
-    return "последние 90 дней (период расширен — за окно цели мало данных)"
+    return "последние 90 дней (период расширен — за окно страницы мало данных)"
   }
   return `${fmtDate(p.from)} — ${fmtDate(p.to)}`
 }
@@ -51,7 +51,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <Card>
       <CardContent className="space-y-1 p-4">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Конверсия по цели · Яндекс.Метрика
+          Конверсия по целевому действию · Яндекс.Метрика
         </p>
         {children}
       </CardContent>
@@ -70,7 +70,7 @@ export function ConversionBlock({
     return (
       <Shell>
         <p className="text-sm">
-          Чтобы видеть конверсию по цели,{" "}
+          Чтобы видеть конверсию по целевому действию,{" "}
           <Link
             href="/dashboard/settings/metrika"
             className="font-medium underline underline-offset-2"

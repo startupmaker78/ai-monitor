@@ -14,7 +14,7 @@ export type NavItem = { title: string; url: string; icon: LucideIcon }
 export const NAV_ITEMS: NavItem[] = [
   { title: "Главная", url: "/dashboard", icon: Home },
   { title: "Сессии", url: "/dashboard/sessions", icon: PlaySquare },
-  { title: "Цели", url: "/dashboard/targets", icon: Target },
+  { title: "Страницы", url: "/dashboard/targets", icon: Target },
   { title: "Рекомендации", url: "/dashboard/recommendations", icon: Lightbulb },
   { title: "Настройки", url: "/dashboard/settings", icon: Settings },
 ]

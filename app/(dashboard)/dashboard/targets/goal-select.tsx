@@ -366,7 +366,7 @@ export function GoalSelect({
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
           >
             <HelpCircle className="h-3.5 w-3.5 shrink-0" />
-            Какую цель выбрать? Открыть гайд
+            Какое целевое действие выбрать? Открыть гайд
           </Link>
         </div>
       </DropdownMenuContent>

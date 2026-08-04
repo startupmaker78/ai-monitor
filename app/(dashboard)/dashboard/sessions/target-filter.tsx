@@ -38,10 +38,10 @@ export function TargetFilter({
     <select
       value={selectedTargetId ?? "all"}
       onChange={handleChange}
-      aria-label="Фильтр по цели"
+      aria-label="Фильтр по странице"
       className="rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
     >
-      <option value="all">Все цели</option>
+      <option value="all">Все страницы</option>
       {targets.map((t) => (
         <option key={t.id} value={t.id}>
           {t.name ?? t.url}

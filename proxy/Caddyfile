@@ -4,6 +4,26 @@
 }
 
 :8080 {
+    # Access-лог: метод/путь/статус/длительность. Тела Caddy не логирует
+    # никогда; секретные заголовки (Authorization=ключ OpenRouter,
+    # X-Proxy-Auth=наш токен) вырезаем фильтром — в лог не попадут.
+    log {
+        output stderr
+        format filter {
+            wrap console
+            request>headers>Authorization delete
+            request>headers>X-Proxy-Auth delete
+        }
+    }
+
+    # Health-чек для Fly LB — без auth, дешёвый 200. Fly бьёт /healthz и
+    # убирает нездоровую машину из ротации (иначе слал бы трафик вслепую).
+    @health path /healthz
+    handle @health {
+        respond "ok" 200
+    }
+
+    # Гейт X-Proxy-Auth: нет/неверный → свой 403 с отличимым заголовком.
     @noauth not header X-Proxy-Auth "{$PROXY_AUTH}"
     handle @noauth {
         header X-Webmon-Proxy "reject-auth"

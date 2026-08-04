@@ -15,6 +15,15 @@ primary_region = 'fra'
   auto_stop_machines = 'off'
   min_machines_running = 1
 
+  # Health-чек: Fly бьёт /healthz на каждой машине и убирает нездоровую из
+  # ротации LB (чтобы не слать трафик в машину с зависшим Caddy).
+  [[http_service.checks]]
+    interval = '15s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/healthz'
+
 [[vm]]
   size = 'shared-cpu-1x'
   memory = '256mb'

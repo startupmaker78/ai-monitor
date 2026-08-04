@@ -8,6 +8,7 @@ import { getEffectiveTier } from "@/lib/tier-limits"
 import { validateSiteOwnership } from "@/lib/site-data"
 import { getMinSessionsBudget } from "@/lib/config"
 import { normalizeUrl } from "@/lib/url-normalize"
+import { urlHostMatchesSite } from "@/lib/site-utils"
 import {
   getGoalsForSite,
   resolveGoalForSite,
@@ -67,6 +68,21 @@ export async function createTarget(
 
   const owns = await validateSiteOwnership(parsed.data.siteId, session.user.id)
   if (!owns) return { ok: false, error: "Сайт не найден" }
+
+  // Хост URL должен совпадать с доменом сайта (или быть его поддоменом) —
+  // иначе трекер на страницах этого сайта её всё равно не запишет, а в списке
+  // копится мусор (были чужие домены вроде nolim.cc/blog на academy.nolim.cc).
+  const site = await prisma.site.findUnique({
+    where: { id: parsed.data.siteId },
+    select: { domain: true },
+  })
+  if (site && !urlHostMatchesSite(parsed.data.url, site.domain)) {
+    return {
+      ok: false,
+      error: `URL должен быть на домене сайта (${site.domain}) или его поддомене.`,
+      field: "url",
+    }
+  }
 
   const tier = await getEffectiveTier(session.user.id)
 
@@ -314,21 +330,16 @@ export async function archiveTarget(
   })
   if (!target) return { ok: false, error: "Страница не найдена" }
   if (target.archivedAt) return { ok: false, error: "Страница уже архивирована" }
+  // Единственный жёсткий блок — идущий анализ (архивация оборвала бы прогон).
+  // Прежний гейт «сначала запустите анализ» (collected>0 без анализа) СНЯТ:
+  // юзер вправе убрать ошибочно добавленную страницу, не сжигая на неё один из
+  // 12 месячных анализов. Клиент показывает честное подтверждение (собранные
+  // сессии не проанализируются и в лимит не вернутся).
   if (target.status === "ANALYZING") {
     return {
       ok: false,
       error:
         "Нельзя архивировать страницу пока идёт AI-анализ. Дождитесь завершения.",
-    }
-  }
-  if (
-    (target.status === "ACTIVE" || target.status === "READY") &&
-    target.sessionsCollected > 0
-  ) {
-    return {
-      ok: false,
-      error:
-        "Сначала запустите анализ собранных сессий. Нельзя архивировать страницу с собранными данными до AI-анализа.",
     }
   }
 

@@ -31,6 +31,23 @@ export function validateDomain(normalized: string): string {
   return normalized
 }
 
+// Совпадает ли хост URL страницы с доменом сайта. Правило: точное совпадение
+// ИЛИ поддомен (blog.site.ru для сайта site.ru). Родительский домен и чужие —
+// нет. Punycode: new URL().hostname отдаёт ASCII/punycode для IDN (кириллица
+// «вебмонитор.рф» → «xn--…»), а site.domain хранится в punycode (validateDomain
+// требует ASCII) → сравнение обеих сторон в punycode корректно. www срезаем.
+export function urlHostMatchesSite(url: string, siteDomain: string): boolean {
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "")
+  } catch {
+    return false
+  }
+  const site = siteDomain.toLowerCase().replace(/^www\./, "")
+  if (!site) return false
+  return host === site || host.endsWith("." + site)
+}
+
 // HTML-snippet для вставки на сайт юзера. Загружает tracker.js с нашего
 // origin'а и передаёт trackingToken через data-token АТРИБУТ (не query):
 // так бандл грузится как `GET /tracker.js` без query → токен не течёт в

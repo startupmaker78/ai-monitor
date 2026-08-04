@@ -274,12 +274,72 @@ export function TargetsClient(props: Props) {
   )
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  ACTIVE: "Сбор сессий",
-  READY: "Сбор завершён",
-  ANALYZING: "Анализируется",
-  COMPLETED: "Анализ завершён",
-  ARCHIVED: "Архив",
+function pluralSession(n: number): string {
+  const d = n % 10
+  const dd = n % 100
+  if (d === 1 && dd !== 11) return "сессия"
+  if (d >= 2 && d <= 4 && (dd < 10 || dd >= 20)) return "сессии"
+  return "сессий"
+}
+
+// Состояние страницы одной строкой (без тройного дубля статус•N/N•%). Полоса
+// = это и есть процент; отдельного числа % нет. При достигнутом бюджете и у
+// проанализированной прогресс не показываем. Сигналы: analyzed (факт анализа,
+// не status — COMPLETED в бою не выставляется), collected/budget, минимум для
+// запуска (Модель B: collected>=5 → «можно запускать» не дожидаясь бюджета).
+function TargetStatus({
+  target,
+  archived,
+  minSessions,
+}: {
+  target: TargetWithStats
+  archived: boolean
+  minSessions: number
+}) {
+  const c = target.sessionsCollected
+  const b = target.sessionsBudget
+
+  if (archived) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">
+        В архиве · собрано {c} {pluralSession(c)}
+      </p>
+    )
+  }
+  if (target.status === "ANALYZING") {
+    return <p className="mt-1 text-xs text-muted-foreground">Идёт анализ…</p>
+  }
+  if (target.analyzed) {
+    return <p className="mt-1 text-xs text-green-700">Проанализирована</p>
+  }
+  // Не анализировалась. Бюджет достигнут → без полосы и %.
+  if (c >= b) {
+    return (
+      <p className="mt-1 text-xs text-amber-700">
+        Сбор завершён — можно запускать · {c} {pluralSession(c)}
+      </p>
+    )
+  }
+  // Копит: полоса + «N / бюджет», без отдельного %.
+  const canRun = c >= minSessions
+  const pct = b > 0 ? Math.min(100, Math.round((c / b) * 100)) : 0
+  return (
+    <div className="mt-1 space-y-1">
+      <p
+        className={`text-xs ${canRun ? "text-amber-700" : "text-muted-foreground"}`}
+      >
+        {canRun ? "Можно запускать" : "Собираем сессии"}
+      </p>
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+          <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {c} / {b}
+        </span>
+      </div>
+    </div>
+  )
 }
 
 // Клиентский таймаут запроса анализа. Норма ~55с; берём 150с — покрывает
@@ -350,14 +410,6 @@ function TargetCard({
     })
   }
 
-  const progress =
-    target.sessionsBudget > 0
-      ? Math.min(
-          100,
-          Math.round((target.sessionsCollected / target.sessionsBudget) * 100),
-        )
-      : 0
-
   async function handleAnalyze() {
     setAnalyzing(true)
     setNotice(null)
@@ -426,13 +478,11 @@ function TargetCard({
             <p className="truncate text-sm text-muted-foreground">
               {target.url}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {archived ? "Архив" : (STATUS_LABELS[target.status] ?? target.status)}
-              {" • "}
-              Сессий: {target.sessionsCollected} / {target.sessionsBudget}
-              {" • "}
-              {progress}%
-            </p>
+            <TargetStatus
+              target={target}
+              archived={archived}
+              minSessions={minSessionsBudget}
+            />
           </div>
           {!archived && (
             <div className="flex flex-col items-end gap-2">
@@ -641,67 +691,61 @@ function ArchiveControl({
   setConfirmMode: (v: boolean) => void
   archiveAction: (formData: FormData) => void
 }) {
-  // Финальная модель (DECISIONS.md hotfix 5):
-  // - COMPLETED → можно архивировать (анализ завершён)
-  // - ACTIVE/READY с collected=0 → можно (юзер передумал)
-  // - ACTIVE/READY с collected>0 → НЕТ, нужен анализ
-  // - ANALYZING → НЕТ, идёт анализ
-  const canArchive =
-    target.status === "COMPLETED" ||
-    ((target.status === "ACTIVE" || target.status === "READY") &&
-      target.sessionsCollected === 0)
-
-  // Во время клиентского запуска (analyzing) причину НЕ показываем: пропа
-  // target ещё старая (статус не ANALYZING) → «Сначала запустите анализ»
-  // противоречило бы идущему анализу. Экран и так занят спиннером кнопки +
-  // «не закрывайте вкладку». В idle причина осмысленна (объясняет disabled-
-  // архив): ANALYZING → «Анализ идёт»; collected>0 → «Сначала запустите».
-  const archiveBlockedReason = analyzing
-    ? null
-    : target.status === "ANALYZING"
-      ? "Анализ идёт"
-      : target.sessionsCollected > 0
-        ? "Сначала запустите анализ"
-        : null
-
-  if (canArchive) {
+  // Единственный блок — идущий анализ (архивация оборвала бы прогон). Гейт
+  // «сначала запустите анализ» СНЯТ: страницу можно убрать, не сжигая анализ.
+  // Во время клиентского analyzing причину не показываем (экран занят
+  // спиннером); при idle-ANALYZING — «Анализ идёт».
+  if (target.status === "ANALYZING" || analyzing) {
+    const showReason = target.status === "ANALYZING" && !analyzing
     return (
-      <form action={archiveAction}>
-        <input type="hidden" name="targetId" value={target.id} />
-        {!confirmMode ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setConfirmMode(true)
-              setTimeout(() => setConfirmMode(false), 5000)
-            }}
-          >
-            Архивировать
-          </Button>
-        ) : (
-          <ArchiveSubmitButton />
+      <div className="flex flex-col items-end gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled
+          title={showReason ? "Анализ идёт" : ""}
+        >
+          Архивировать
+        </Button>
+        {showReason && (
+          <span className="text-xs text-muted-foreground">Анализ идёт</span>
         )}
-      </form>
+      </div>
     )
   }
+
+  // Честное подтверждение: собранные, но НЕ проанализированные сессии пропадут
+  // и в лимит не вернутся (архивация возвращает только НЕсобранный остаток).
+  const warnUnanalyzed = target.sessionsCollected > 0 && !target.analyzed
+
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled
-        title={archiveBlockedReason ?? ""}
-      >
-        Архивировать
-      </Button>
-      {archiveBlockedReason && (
-        <span className="text-xs text-muted-foreground">
-          {archiveBlockedReason}
-        </span>
+    <form action={archiveAction}>
+      <input type="hidden" name="targetId" value={target.id} />
+      {!confirmMode ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setConfirmMode(true)
+            setTimeout(() => setConfirmMode(false), 6000)
+          }}
+        >
+          Архивировать
+        </Button>
+      ) : (
+        <div className="flex flex-col items-end gap-1">
+          {warnUnanalyzed && (
+            <span className="max-w-[15rem] text-right text-xs text-muted-foreground">
+              Собрано {target.sessionsCollected}{" "}
+              {pluralSession(target.sessionsCollected)} — они не будут
+              проанализированы и не вернутся в лимит.
+            </span>
+          )}
+          <ArchiveSubmitButton />
+        </div>
       )}
-    </div>
+    </form>
   )
 }

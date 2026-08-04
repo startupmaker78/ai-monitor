@@ -21,6 +21,10 @@ export type TargetWithStats = {
   // цифре). ПЕРВАЯ установка на цель с анализами (действие ещё не задано) —
   // разрешена (противоречить нечему). Гейт дублируется в setTargetGoal.
   goalLocked: boolean
+  // Была ли хоть раз проанализирована (есть DONE-анализ). Статус для этого не
+  // годится: после анализа цель возвращается в READY/ACTIVE (recollect), а
+  // COMPLETED в бою не выставляется.
+  analyzed: boolean
 }
 
 export type TargetsPageData = {
@@ -97,6 +101,7 @@ export async function getTargetsPageData(
     metrikaGoalName: t.metrikaGoalName,
     metrikaGoalType: t.metrikaGoalType,
     goalLocked: t.metrikaGoalId !== null && t.analyses.length > 0,
+    analyzed: t.analyses.length > 0,
   }))
 
   const activeTargets = allTargets.filter((t) => t.archivedAt === null)

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { callClaude } from "@/lib/claude-client"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -51,10 +52,66 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch {
     /* тела может не быть — только egress */
   }
-  const { url, cfAuth, long } = (body ?? {}) as {
+  const { url, cfAuth, long, prodpath } = (body ?? {}) as {
     url?: string
     cfAuth?: string // cf-aig токен (тест CF-гейта)
     long?: boolean // true → ДЛИННАЯ генерация ~60-90с (проверка idle-таймаута прокси)
+    prodpath?: boolean // true → воспроизвести БОЕВОЙ путь (env AI_API_URL + callClaude)
+  }
+
+  // Воспроизведение боевого пути: две пробы из одного окружения контейнера.
+  // (A) сырой fetch на process.env.AI_API_URL (как claude-client, не хардкод) с
+  //     телом ~реального размера и теми же заголовками.
+  // (B) сам callClaude() — точная прод-функция транспорта.
+  // Если обе 200 — расхождение в контексте runAnalysis (сбор S3/метрика до
+  // вызова). Если A/B падают ConnectTimeout — баг в env-URL / claude-client.
+  if (prodpath) {
+    const envUrl = process.env.AI_API_URL ?? ""
+    const key = process.env.OPENROUTER_API_KEY ?? ""
+    const pAuth = process.env.AI_PROXY_AUTH
+    const bigText = "Проанализируй сессию. ".repeat(600) // ~12 КБ, размер с промпт
+    // (A) сырой fetch, зеркало claude-client
+    let rawA:
+      | { ok: boolean; status: number; ms: number; body: string }
+      | { error: string; ms: number }
+    {
+      const h: Record<string, string> = {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://staging.xn--90abjntggcss.xn--p1ai",
+        "X-Title": "Webmonitor",
+      }
+      if (pAuth) h["X-Proxy-Auth"] = pAuth
+      const t0 = Date.now()
+      try {
+        const r = await fetch(envUrl, {
+          method: "POST",
+          headers: h,
+          body: JSON.stringify({
+            model: process.env.AI_MODEL ?? "anthropic/claude-opus-4-7",
+            max_tokens: 50,
+            messages: [{ role: "user", content: bigText }],
+          }),
+        })
+        const txt = await r.text().catch(() => "")
+        rawA = { ok: r.ok, status: r.status, ms: Date.now() - t0, body: redact(txt) }
+      } catch (e) {
+        const err = e as Error & { cause?: { code?: string } }
+        rawA = { error: `${err.message} / ${err.cause?.code ?? "?"}`, ms: Date.now() - t0 }
+      }
+    }
+    // (B) сам callClaude — точный прод-транспорт
+    const t1 = Date.now()
+    const cc = await callClaude({ system: "Ты аналитик.", messages: [{ role: "user", content: bigText }], maxTokens: 50 })
+    const ccOut = cc.ok
+      ? { ok: true, ms: Date.now() - t1, textLen: cc.text.length }
+      : { ok: false, ms: Date.now() - t1, error: cc.error, details: redact(cc.details ?? "") }
+    return NextResponse.json({
+      egress,
+      envUrl,
+      rawFetch: rawA, // (A)
+      callClaude: ccOut, // (B)
+    })
   }
 
   // SSRF-гард: только известные AI-эндпоинты (CF-гейт и наш Fly-прокси).

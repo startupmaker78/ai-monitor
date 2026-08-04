@@ -4,8 +4,9 @@ import { useFormState, useFormStatus } from "react-dom"
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { CheckCircle2, Loader2, Lock, HelpCircle } from "lucide-react"
+import { CheckCircle2, Loader2, Lock, HelpCircle, Plus } from "lucide-react"
 import { guideHref } from "@/lib/guide-anchors"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -79,6 +80,16 @@ function ArchiveSubmitButton() {
   )
 }
 
+// Завершённая = полный бюджет И есть анализ. Такая страница замерла навсегда:
+// бюджет не растёт, оба гейта (should-record + атомарный инкремент) закрывают
+// приём новых сессий. Проанализированная, но НЕ добитая до бюджета — ещё
+// собирает (Модель B), поэтому остаётся в «Активных».
+function isCompleted(t: TargetWithStats): boolean {
+  return t.analyzed && t.sessionsCollected >= t.sessionsBudget
+}
+
+type TabKey = "active" | "completed" | "archived"
+
 export function TargetsClient(props: Props) {
   const [createState, createAction] = useFormState(createTarget, initialState)
   const [createGoal, setCreateGoal] = useState<PickedGoal>(null)
@@ -87,6 +98,33 @@ export function TargetsClient(props: Props) {
   const canCreate =
     props.targetsRemaining > 0 &&
     props.sessionsRemaining >= props.minSessionsBudget
+
+  // Разбиваем НЕархивные на «собирает/готова к анализу» и «завершена».
+  // Тарифная математика (targetsRemaining/sessionsAllocated) считается по
+  // ВСЕМ неархивным в targets-data — завершённые тоже занимают ячейку лимита
+  // (см. TODO про монетизацию), поэтому здесь только раскладываем по вкладкам.
+  const completedTargets = props.activeTargets.filter(isCompleted)
+  const collectingTargets = props.activeTargets.filter((t) => !isCompleted(t))
+
+  // Ноль неархивных страниц → форма раскрыта сразу (первый заход).
+  const [showForm, setShowForm] = useState(props.activeTargets.length === 0)
+  const [activeTab, setActiveTab] = useState<TabKey>("active")
+
+  function openForm() {
+    setShowForm(true)
+    // Дать форме отрендериться, затем прокрутить к ней.
+    setTimeout(() => {
+      document
+        .getElementById("add-page-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }, 50)
+  }
+
+  const tabs: { key: TabKey; label: string; count: number }[] = [
+    { key: "active", label: "Активные", count: collectingTargets.length },
+    { key: "completed", label: "Завершённые", count: completedTargets.length },
+    { key: "archived", label: "Архив", count: props.archivedTargets.length },
+  ]
 
   return (
     <div className="space-y-6">
@@ -104,7 +142,25 @@ export function TargetsClient(props: Props) {
         </CardHeader>
       </Card>
 
-      <Card>
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant={showForm ? "outline" : "default"}
+          onClick={() => (showForm ? setShowForm(false) : openForm())}
+        >
+          {showForm ? (
+            "Скрыть форму"
+          ) : (
+            <>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Добавить страницу
+            </>
+          )}
+        </Button>
+      </div>
+
+      {showForm && (
+      <Card id="add-page-form">
         <CardHeader>
           <CardTitle>Добавить страницу</CardTitle>
           <CardDescription>
@@ -227,18 +283,57 @@ export function TargetsClient(props: Props) {
           </form>
         </CardContent>
       </Card>
+      )}
 
-      <div>
-        <h3 className="mb-3 text-lg font-semibold">
-          Активные страницы ({props.activeTargets.length})
-        </h3>
-        {props.activeTargets.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Нет активных страниц. Добавьте первую через форму выше.
-          </p>
+      {/* Вкладки со счётчиками. Активные = собирает/готова к анализу;
+          Завершённые = полный бюджет И проанализирована (статична);
+          Архив = убранные пользователем. */}
+      <div className="flex gap-1 border-b">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={cn(
+              "-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+              activeTab === tab.key
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {tab.label}{" "}
+            <span
+              className={cn(
+                "ml-1 rounded-full px-1.5 py-0.5 text-xs",
+                activeTab === tab.key
+                  ? "bg-primary/10 text-foreground"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {tab.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "active" &&
+        (collectingTargets.length === 0 ? (
+          <div className="rounded-lg border border-dashed bg-card p-8 text-center">
+            <p className="mb-1 font-medium">Нет активных страниц</p>
+            <p className="mx-auto mb-4 max-w-md text-sm text-muted-foreground">
+              Активные страницы собирают сессии и готовятся к AI-анализу.
+              {completedTargets.length > 0 &&
+                " Завершённые — на соседней вкладке."}{" "}
+              Добавьте страницу, чтобы начать сбор.
+            </p>
+            <Button type="button" onClick={openForm}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Добавить страницу
+            </Button>
+          </div>
         ) : (
           <div className="space-y-3">
-            {props.activeTargets.map((t) => (
+            {collectingTargets.map((t) => (
               <TargetCard
                 key={t.id}
                 target={t}
@@ -248,14 +343,34 @@ export function TargetsClient(props: Props) {
               />
             ))}
           </div>
-        )}
-      </div>
+        ))}
 
-      {props.archivedTargets.length > 0 && (
-        <div>
-          <h3 className="mb-3 text-lg font-semibold text-muted-foreground">
-            Архивированные ({props.archivedTargets.length})
-          </h3>
+      {activeTab === "completed" &&
+        (completedTargets.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            Пока нет завершённых страниц. Страница попадёт сюда, когда соберёт
+            полный бюджет сессий и пройдёт AI-анализ.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {completedTargets.map((t) => (
+              <TargetCard
+                key={t.id}
+                target={t}
+                siteId={props.siteId}
+                metrikaConfigured={props.metrikaConfigured}
+                minSessionsBudget={props.minSessionsBudget}
+              />
+            ))}
+          </div>
+        ))}
+
+      {activeTab === "archived" &&
+        (props.archivedTargets.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            Архив пуст.
+          </p>
+        ) : (
           <div className="space-y-3">
             {props.archivedTargets.map((t) => (
               <TargetCard
@@ -268,8 +383,7 @@ export function TargetsClient(props: Props) {
               />
             ))}
           </div>
-        </div>
-      )}
+        ))}
     </div>
   )
 }
@@ -310,7 +424,34 @@ function TargetStatus({
     return <p className="mt-1 text-xs text-muted-foreground">Идёт анализ…</p>
   }
   if (target.analyzed) {
-    return <p className="mt-1 text-xs text-green-700">Проанализирована</p>
+    // Проанализирована И ещё не добита до бюджета → цель осталась ACTIVE и
+    // ПРОДОЛЖАЕТ собирать (Модель B: анализ прошёл на частичном бюджете).
+    // Показываем это явно + прогресс. На ПОЛНОМ бюджете страница замерла
+    // навсегда (оба гейта закрыты) — badge «собирает» не показываем, она в
+    // «Завершённых» и статична.
+    if (c < b) {
+      const pct = b > 0 ? Math.min(100, Math.round((c / b) * 100)) : 0
+      return (
+        <div className="mt-1 space-y-1">
+          <p className="text-xs text-green-700">
+            Проанализирована · собирает новые сессии
+          </p>
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {c} / {b}
+            </span>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <p className="mt-1 text-xs text-green-700">
+        Проанализирована · сбор завершён
+      </p>
+    )
   }
   // Не анализировалась. Бюджет достигнут → без полосы и %.
   if (c >= b) {

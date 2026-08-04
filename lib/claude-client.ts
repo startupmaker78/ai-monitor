@@ -3,9 +3,10 @@
 // OpenRouter отдаёт OpenAI-совместимый chat completions API; модель
 // anthropic/claude-opus-4-7 проходит через Amazon Bedrock.
 // Дефолты; переопределяются из env ПРИ ВЫЗОВЕ (не при сборке) —
-// смена провайдера/AI-шлюза = обновление Lockbox без rebuild. AI_API_URL
-// = CF AI Gateway endpoint (обход гео-блока OpenRouter из РФ, доказано
-// TEMP-тестом: direct 403 / via CF 200); fallback — прямой OpenRouter.
+// смена провайдера/прокси = обновление Lockbox без rebuild. AI_API_URL
+// = наш Fly-прокси (Франкфурт) к OpenRouter: region-pinned не-РФ egress
+// обходит гео-блок (CF AI Gateway отвалился — резал РФ-IP; см. DECISIONS
+// 2026-08-05); fallback — прямой OpenRouter.
 const DEFAULT_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 const DEFAULT_MODEL = "anthropic/claude-opus-4-7"
 const DEFAULT_MAX_TOKENS = 4096
@@ -33,26 +34,25 @@ export type ClaudeResult =
       ok: false
       error:
         | "auth_failed" // 401 провайдера: ключ OpenRouter отклонён
-        | "gateway_auth_failed" // 401 самого CF-шлюза: cf-aig токен
-        | "gateway_blocked" // 403 CF security policy (Access denied by security policy)
-        | "access_denied" // прочий 403 — причину НЕ приписываем
+        | "proxy_error" // отказ НАШЕГО Fly-прокси (X-Webmon-Proxy), не провайдер
+        | "access_denied" // 403 провайдера — причину НЕ приписываем
         | "insufficient_credits" // 402 — баланс/кредиты провайдера
         | "rate_limit"
         | "relay_unavailable"
         | "api_error"
         | "network_error"
         | "invalid_response"
-      // Санитизированная суть ответа провайдера/шлюза (без ключей/URL) — в лог
-      // и в клиентское сообщение. Различаем под-причины по РЕАЛЬНЫМ телам:
-      // CF policy 403 «Access denied by security policy»; CF auth 401
-      // AiGatewayError/2009; ключ OR 401 «User not found»; кредиты 402.
+      // Санитизированная суть ответа провайдера (без ключей/URL) — в лог и в
+      // клиентское сообщение. Под-причины по РЕАЛЬНЫМ телам: ключ OR 401
+      // «User not found»; кредиты 402. Отказ самого прокси — отдельно,
+      // по заголовку X-Webmon-Proxy (см. ниже), не путается с провайдером.
       details?: string
     }
 
 // Вычищает всё, что похоже на секреты/внутренние URL, из текста ответа
 // провайдера — чтобы санитизированная суть могла безопасно уйти и в лог, и в
 // клиентское сообщение. Тела ошибок обычно НЕ эхают Authorization, но чистим
-// как defense-in-depth (ключ OR sk-…, cf-aig Bearer, любой https-URL шлюза).
+// как defense-in-depth (ключ OR sk-…, X-Proxy-Auth/Bearer, любой https-URL).
 function sanitizeProviderText(s: string): string {
   return s
     .replace(/sk-[a-z]+-[A-Za-z0-9._-]+/gi, "[ключ]")
@@ -107,9 +107,9 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
   // Резолв конфигурации при вызове (env читается в рантайме контейнера).
   const apiUrl = process.env.AI_API_URL ?? DEFAULT_API_URL
   const model = process.env.AI_MODEL ?? DEFAULT_MODEL
-  // Токен доступа к CF AI Gateway. Шлём заголовок ТОЛЬКО если задан —
-  // при fallback на прямой OpenRouter лишний cf-aig-заголовок не нужен.
-  const gatewayAuth = process.env.AI_GATEWAY_AUTH
+  // Токен нашего Fly-прокси (X-Proxy-Auth). Прокси без него отдаёт 403 (не
+  // открытый релей). Шлём ТОЛЬКО если задан — при прямом OpenRouter не нужен.
+  const proxyAuth = process.env.AI_PROXY_AUTH
 
   // Конвертация Anthropic-стиля {system, messages} в OpenAI-стиль:
   // system становится первым message с role:"system". Если caller уже
@@ -131,8 +131,8 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
     "HTTP-Referer": REFERER_URL,
     "X-Title": APP_TITLE,
   }
-  if (gatewayAuth) {
-    headers["cf-aig-authorization"] = `Bearer ${gatewayAuth}`
+  if (proxyAuth) {
+    headers["X-Proxy-Auth"] = proxyAuth
   }
 
   let response: Response
@@ -157,15 +157,26 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
     }
   }
 
-  if (response.status === 401) {
-    // Различаем 401 САМОГО шлюза (cf-aig токен, формат AiGatewayError/2009 —
-    // проверено тестом «без cf-aig») от 401 ПРОВАЙДЕРА (ключ OpenRouter
-    // отклонён, «User not found» — проверено тестом с невалидным ключом).
+  // ОТКАЗ САМОГО ПРОКСИ (не провайдера) — ДО разбора статуса. Fly-прокси
+  // помечает свои ответы заголовком X-Webmon-Proxy (плохой X-Proxy-Auth → 403
+  // с этим заголовком). Если сначала классифицировать по статусу, 403 прокси
+  // уехал бы в access_denied — ровно та склейка причин, которую мы чиним.
+  // proxy_error = наш конфиг/токен прокси, НЕ провайдер.
+  if (response.headers.get("x-webmon-proxy")) {
     const text = await response.text().catch(() => "")
-    const isGatewayAuth = /AiGatewayError/i.test(text) || /"code"\s*:\s*2009/.test(text)
     return {
       ok: false,
-      error: isGatewayAuth ? "gateway_auth_failed" : "auth_failed",
+      error: "proxy_error",
+      details: providerReason(text, response.status),
+    }
+  }
+
+  if (response.status === 401) {
+    // 401 провайдера — ключ OpenRouter отклонён («User not found», проверено).
+    const text = await response.text().catch(() => "")
+    return {
+      ok: false,
+      error: "auth_failed",
       details: providerReason(text, 401),
     }
   }
@@ -179,15 +190,13 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
     }
   }
   if (response.status === 403) {
-    // Различаем security-policy блок CF-эджа (реальное тело «Access denied by
-    // security policy» — так режет РФ-IP контейнера) от прочих 403. Повтор НЕ
-    // поможет — нужна проверка конфигурации. Причину (гео/иное) прочему 403 НЕ
-    // приписываем — тела не видели.
+    // 403 провайдера (отказ прокси уже отсеян выше по X-Webmon-Proxy). Повтор
+    // не поможет — нужна проверка доступа/конфигурации. Причину (гео/политика)
+    // НЕ приписываем — суть в details.
     const text = await response.text().catch(() => "")
-    const isSecurityPolicy = /access denied by security policy/i.test(text)
     return {
       ok: false,
-      error: isSecurityPolicy ? "gateway_blocked" : "access_denied",
+      error: "access_denied",
       details: providerReason(text, 403),
     }
   }

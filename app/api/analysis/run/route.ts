@@ -22,7 +22,7 @@ const ERROR_TO_HTTP: Record<RunAnalysisError, number> = {
   monthly_limit: 429,
   race_condition: 409,
   provider_denied: 502,
-  gateway_auth_failed: 502,
+  proxy_error: 502,
   provider_key_invalid: 502,
   provider_billing: 402,
   relay_unavailable: 503,

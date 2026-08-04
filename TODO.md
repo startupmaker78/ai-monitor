@@ -506,10 +506,10 @@ pagehide (ненадёжен: iOS Safari часто отбрасывает), л�
   `collected<5`; цель после анализа возвращается в сбор (не терминал);
   повтор гейтится месячным лимитом 12 + top-10 закрыты. config floor
   100→5. ПОДТВЕРЖДЕНО на живом. См. DECISIONS 2026-07-14 «Модель B».
-- **[DONE] CF AI Gateway — обход geo-блока OpenRouter (403 РФ-IP)** (commit
-  `40c8cec`, revision `bbaru2ue8gr6rq069e4g`, Lockbox v `e6qhkba8…`).
-  ✅ реальный анализ Opus работает в проде (DONE 52с, 7259 токенов, 8 рек).
-  См. DECISIONS 2026-07-14 «OpenRouter geo-блок → CF AI Gateway».
+- **[ОТМЕНЁН 2026-08-05] CF AI Gateway** — CF начал резать РФ-IP контейнера
+  (403 «Access denied by security policy»). Заменён на **Fly-прокси**
+  (Frankfurt, region-pinned не-РФ egress). `AI_GATEWAY_AUTH`/cf-aig удалены
+  из кода и из `SECRET_KEYS`. См. DECISIONS 2026-08-05 «CF AI Gateway → Fly».
 - **[DONE] normalizeUrl — срез `&param` из path** (реферальные ссылки),
   commit `0f4806a`.
 - **[DONE] 4 новые цели по топ-страницам academy** (budget 30, все матчатся).
@@ -529,10 +529,10 @@ pagehide (ненадёжен: iOS Safari часто отбрасывает), л�
   на карточке + server-action/API смены `RecommendationStatus` + фильтры
   по статусу. **После — можно вернуть МЯГКИЙ гейт** (предупреждение, не
   блок) перед повторным анализом.
-- **[гигиена] ротировать CF AI Gateway токен `AI_GATEWAY_AUTH`** — первый
-  засветился в чате, владелец удалил и пересоздал (новый чист). При общей
-  ротации кредов перед релизом учесть `AI_GATEWAY_AUTH` (в списке с e464,
-  CRON_SECRET и пр.).
+- **[гигиена] `AI_GATEWAY_AUTH` — мёртвый груз в Lockbox** (CF отменён
+  2026-08-05). Убран из `SECRET_KEYS`, но значение осталось в версиях Lockbox.
+  Удалить при общей ротации/чистке. Новый актуальный секрет транспорта —
+  `AI_PROXY_AUTH` (X-Proxy-Auth Fly-прокси): его в ротацию вместо cf-aig.
 - **[низкий] ссылка «Перейти к рекомендациям» с карточки цели убрана** —
   жила в COMPLETED-ветке, которой в Модели B нет. Нужен флаг «есть
   DONE-анализ» в `targets-data` + ссылка на карточке. UX: после анализа

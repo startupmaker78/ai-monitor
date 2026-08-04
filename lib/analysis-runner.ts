@@ -24,8 +24,8 @@ export type RunAnalysisError =
   | "collect_timeout"
   | "monthly_limit"
   | "race_condition"
-  | "provider_denied" // CF security policy / прочий 403 провайдера
-  | "gateway_auth_failed" // 401 самого CF-шлюза (cf-aig токен)
+  | "provider_denied" // 403 провайдера
+  | "proxy_error" // отказ нашего Fly-прокси (X-Webmon-Proxy), не провайдер
   | "provider_key_invalid" // 401 провайдера (ключ OpenRouter отклонён)
   | "provider_billing" // 402 (баланс/кредиты)
   | "relay_unavailable"
@@ -160,7 +160,7 @@ export async function runAnalysis(
   // сигналы важнее чистого закрытия, а прайм-структуру не меняем; флаг
   // остаётся в ExtractResult для будущей observability.
   //
-  // ── 152-ФЗ: ЧТО уходит в Claude через CF AI Gateway (США) ──────────────
+  // ── 152-ФЗ: ЧТО уходит в Claude через Fly-прокси (Франкфурт)→OpenRouter ──
   // В промпт (JSON.stringify sessionSummaries) идут ТОЛЬКО:
   //   • clicks[].text — публичный текст элементов страницы («Я согласен»,
   //     «Программы»); НЕ данные посетителя;
@@ -352,30 +352,32 @@ export async function runAnalysis(
         analysisId: analysis.id,
       }
     }
-    // 403/401/402 от шлюза/провайдера — под-причины разведены по реальным
-    // телам (не склеиваем в один текст). Все НЕ ретраибельны — нужна правка
-    // конфигурации/баланса, не повтор. Санитизированную суть ответа
-    // (claudeResult.details) кладём и в лог, и в сообщение — экономит разбор.
+    // Отказы прокси/провайдера — под-причины разведены по реальным телам (не
+    // склеиваем в один текст). Все НЕ ретраибельны — нужна правка конфигурации/
+    // баланса, не повтор. Санитизированную суть ответа (claudeResult.details)
+    // кладём и в лог, и в сообщение — экономит разбор.
     const provider = claudeResult.details ?? ""
-    if (claudeResult.error === "gateway_blocked") {
-      console.error("[analysis-runner] AI gateway blocked (CF security policy)", {
+    if (claudeResult.error === "proxy_error") {
+      // Отказ НАШЕГО Fly-прокси (X-Webmon-Proxy), не провайдера. Обычно плохой
+      // X-Proxy-Auth / конфиг прокси. Не путается с 403 провайдера.
+      console.error("[analysis-runner] AI proxy rejected request", {
         analysisId: analysis.id,
         targetId,
         errorType: claudeResult.error,
-        errorCategory: "gateway_blocked",
+        errorCategory: "proxy_error",
         details: provider,
       })
       await markFailed(analysis.id, targetId)
       return {
         ok: false,
-        error: "provider_denied",
-        message: `AI-шлюз (Cloudflare) отклонил запрос политикой безопасности — вероятно, блокировка исходящего IP. Повтор не поможет, нужна проверка правил CF. Ответ шлюза: ${provider}`,
+        error: "proxy_error",
+        message: `Наш AI-прокси отклонил запрос (не провайдер) — проверьте X-Proxy-Auth / конфигурацию прокси. Ответ: ${provider}`,
         analysisId: analysis.id,
       }
     }
     if (claudeResult.error === "access_denied") {
-      // Прочий 403 (не CF security policy). Причину НЕ приписываем — суть в
-      // details.
+      // 403 ПРОВАЙДЕРА (отказ прокси отсеян выше). Причину НЕ приписываем —
+      // суть в details.
       console.error("[analysis-runner] provider denied request (403)", {
         analysisId: analysis.id,
         targetId,
@@ -387,23 +389,7 @@ export async function runAnalysis(
       return {
         ok: false,
         error: "provider_denied",
-        message: `AI-провайдер отклонил запрос (403). Повтор не поможет — нужна проверка конфигурации AI-шлюза. Ответ: ${provider}`,
-        analysisId: analysis.id,
-      }
-    }
-    if (claudeResult.error === "gateway_auth_failed") {
-      console.error("[analysis-runner] AI gateway auth failed (cf-aig)", {
-        analysisId: analysis.id,
-        targetId,
-        errorType: claudeResult.error,
-        errorCategory: "gateway_auth_failed",
-        details: provider,
-      })
-      await markFailed(analysis.id, targetId)
-      return {
-        ok: false,
-        error: "gateway_auth_failed",
-        message: `AI-шлюз не принял авторизацию шлюза (cf-aig). Проверьте AI_GATEWAY_AUTH. Ответ: ${provider}`,
+        message: `AI-провайдер отклонил запрос (403). Повтор не поможет — нужна проверка доступа/конфигурации. Ответ: ${provider}`,
         analysisId: analysis.id,
       }
     }

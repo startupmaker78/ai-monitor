@@ -21,7 +21,7 @@ env:
   # Запиннутая версия Lockbox. При добавлении/ротации секрета — залить новую
   # версию и обновить ЭТОТ id (гейт «секреты в пине» ниже валит билд, если
   # ключа из SECRET_KEYS нет в этой версии — не даёт секрету молча отстать).
-  YC_LOCKBOX_VERSION_ID: e6qkh4dh2g4o2ls25heb
+  YC_LOCKBOX_VERSION_ID: e6q0og2iju2601t56ml2
   # Единый список ключей секретов — источник правды и для гейта наличия, и для
   # деплой-шага (не дублируем, не разъезжаемся).
   SECRET_KEYS: >-
@@ -29,7 +29,7 @@ env:
     YOS_ACCESS_KEY_ID YOS_SECRET_ACCESS_KEY YOS_PUBLIC_URL ANTHROPIC_API_KEY
     OPENROUTER_API_KEY METRIKA_CLIENT_ID METRIKA_CLIENT_SECRET YOOKASSA_SHOP_ID
     YOOKASSA_SECRET_KEY RESEND_API_KEY IP_HASH_SALT CRON_SECRET DEMO_USER_ID
-    MIN_SESSIONS_BUDGET AI_GATEWAY_AUTH AI_API_URL AI_PROXY_AUTH
+    MIN_SESSIONS_BUDGET AI_API_URL AI_PROXY_AUTH
   IMAGE_REPO: webmonitor
 
 jobs:

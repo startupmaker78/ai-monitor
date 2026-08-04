@@ -4,17 +4,14 @@ import type { SessionsForUser, SessionListItem } from "@/lib/sessions-data"
 import type { DeviceType } from "@/lib/device"
 import { LocalDateTime } from "@/components/ui/local-date-time"
 import { SessionStatus } from "@/components/ui/session-status"
+import { GoalColumnInfo } from "./goal-column-info"
 
 type Props = {
   sessions: SessionsForUser["sessions"]
   selectedSiteId: string | null
   selectedTargetId: string | null
+  selectedGoal: string | null
   currentSort: "newest" | "oldest"
-  showSite: boolean
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n - 1) + "…" : s
 }
 
 const DEVICE_META: Record<
@@ -58,16 +55,21 @@ export function SessionsTable({
   sessions,
   selectedSiteId,
   selectedTargetId,
+  selectedGoal,
   currentSort,
-  showSite,
 }: Props) {
-  // Цель дублировала бы себя в каждой строке при выбранном фильтре — прячем.
+  // «Страница» дублировалась бы в каждой строке при выбранном фильтре страницы
+  // — прячем. При фильтре по действию страницы РАЗНЫЕ → колонку оставляем.
   const showTarget = selectedTargetId === null
+  // «Целевое действие» постоянно и при фильтре страницы (одна страница), и при
+  // фильтре действия (все = выбранное) — в обоих случаях колонка-дубль, прячем.
+  const showGoal = selectedTargetId === null && selectedGoal === null
 
   function buildSortHref(targetSort: "newest" | "oldest"): string {
     const params = new URLSearchParams()
     if (selectedSiteId) params.set("site", selectedSiteId)
     if (selectedTargetId) params.set("targetId", selectedTargetId)
+    if (selectedGoal) params.set("goal", selectedGoal)
     if (targetSort === "oldest") params.set("sort", "oldest")
     const qs = params.toString()
     return qs ? `?${qs}` : "/dashboard/sessions"
@@ -97,8 +99,13 @@ export function SessionsTable({
             <th className="px-4 py-3 font-medium">Устройство</th>
             <th className="px-4 py-3 font-medium">Длительность</th>
             <th className="px-4 py-3 font-medium">Активность</th>
-            {showSite && <th className="px-4 py-3 font-medium">Сайт</th>}
             {showTarget && <th className="px-4 py-3 font-medium">Страница</th>}
+            {showGoal && (
+              <th className="px-4 py-3 font-medium">
+                <span className="align-middle">Целевое действие страницы</span>
+                <GoalColumnInfo />
+              </th>
+            )}
             <th className="px-4 py-3 font-medium">Посетитель</th>
             <th className="px-4 py-3 font-medium text-right">Запись</th>
           </tr>
@@ -134,24 +141,28 @@ export function SessionsTable({
                 <td className={`px-4 py-3 whitespace-nowrap ${act.className}`}>
                   {act.text}
                 </td>
-                {showSite && (
-                  <td className="px-4 py-3">
-                    <span>{s.site.domain}</span>
-                    {s.site.isDemo && (
-                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                        демо
-                      </span>
-                    )}
-                  </td>
-                )}
                 {showTarget && (
                   <td className="px-4 py-3">
                     {s.analysisTarget ? (
-                      <span title={s.analysisTarget.url}>
-                        {truncate(
-                          s.analysisTarget.name ?? s.analysisTarget.url,
-                          40,
-                        )}
+                      <span
+                        title={s.analysisTarget.name ?? s.analysisTarget.url}
+                        className="block max-w-[16rem] truncate"
+                      >
+                        {s.analysisTarget.name ?? s.analysisTarget.url}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                )}
+                {showGoal && (
+                  <td className="px-4 py-3">
+                    {s.analysisTarget?.metrikaGoalName ? (
+                      <span
+                        title={s.analysisTarget.metrikaGoalName}
+                        className="block max-w-[14rem] truncate text-muted-foreground"
+                      >
+                        {s.analysisTarget.metrikaGoalName}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>

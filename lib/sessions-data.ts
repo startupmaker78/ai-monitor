@@ -18,21 +18,41 @@ export type SessionListItem = {
   interactionCount: number
   sessionClass: SessionClass
   site: { id: string; domain: string; isDemo: boolean }
-  analysisTarget: { id: string; url: string; name: string | null } | null
+  // metrikaGoalName — целевое действие, заданное для СТРАНИЦЫ (не факт о
+  // сессии: достижение в конкретной записи мы не определяем, см. DECISIONS).
+  analysisTarget: {
+    id: string
+    url: string
+    name: string | null
+    metrikaGoalName: string | null
+  } | null
 }
 
 export type SessionsForUser = {
   sites: Array<{ id: string; domain: string; isDemo: boolean }>
-  // Активные цели выбранного сайта — для фильтра по цели.
-  targets: Array<{ id: string; url: string; name: string | null }>
+  // Активные страницы выбранного сайта — для фильтра по странице.
+  targets: Array<{
+    id: string
+    url: string
+    name: string | null
+    metrikaGoalName: string | null
+  }>
+  // Уникальные целевые действия среди страниц сайта — для фильтра по действию.
+  goalActions: string[]
   sessions: SessionListItem[]
   selectedSiteId: string | null
   selectedTargetId: string | null
+  selectedGoal: string | null
 }
 
 export async function getSessionsForUser(
   userId: string,
-  options: { siteId?: string; targetId?: string; sort?: "newest" | "oldest" } = {},
+  options: {
+    siteId?: string
+    targetId?: string
+    goal?: string
+    sort?: "newest" | "oldest"
+  } = {},
 ): Promise<SessionsForUser> {
   // withDbRetry: SSR-страницы дашборда на scale-to-zero контейнере ловят
   // idle-обрыв TCP к Managed PG на первом запросе после простоя. Без
@@ -54,9 +74,11 @@ export async function getSessionsForUser(
     return {
       sites: [],
       targets: [],
+      goalActions: [],
       sessions: [],
       selectedSiteId: null,
       selectedTargetId: null,
+      selectedGoal: null,
     }
   }
 
@@ -79,7 +101,7 @@ export async function getSessionsForUser(
         prisma.analysisTarget.findMany({
           where: { siteId: effectiveSiteId, archivedAt: null },
           orderBy: { createdAt: "asc" },
-          select: { id: true, url: true, name: true },
+          select: { id: true, url: true, name: true, metrikaGoalName: true },
         }),
       )
     : []
@@ -91,11 +113,30 @@ export async function getSessionsForUser(
       ? options.targetId
       : null
 
+  // Уникальные целевые действия среди страниц сайта (для фильтра по действию).
+  // Одно действие может стоять на нескольких страницах — фильтр покажет их все.
+  const goalActions = Array.from(
+    new Set(
+      targets
+        .map((t) => t.metrikaGoalName)
+        .filter((g): g is string => Boolean(g)),
+    ),
+  ).sort((a, b) => a.localeCompare(b, "ru"))
+
+  // Валидируем goal: только из списка действий сайта.
+  const validatedGoal =
+    options.goal && goalActions.includes(options.goal) ? options.goal : null
+
   const rows = await withDbRetry(() =>
     prisma.session.findMany({
       where: {
         siteId: validatedSiteId ?? { in: siteIds },
         ...(validatedTargetId ? { analysisTargetId: validatedTargetId } : {}),
+        // Фильтр по действию: сессии страниц, у которых задано это целевое
+        // действие. Комбинируется с фильтром страницы (AND).
+        ...(validatedGoal
+          ? { analysisTarget: { metrikaGoalName: validatedGoal } }
+          : {}),
       },
       orderBy: { startedAt: options.sort === "oldest" ? "asc" : "desc" },
       take: 50,
@@ -111,7 +152,9 @@ export async function getSessionsForUser(
         hasFullSnapshot: true,
         eventsCount: true,
         site: { select: { id: true, domain: true, isDemo: true } },
-        analysisTarget: { select: { id: true, url: true, name: true } },
+        analysisTarget: {
+          select: { id: true, url: true, name: true, metrikaGoalName: true },
+        },
       },
     }),
   )
@@ -137,9 +180,11 @@ export async function getSessionsForUser(
   return {
     sites,
     targets,
+    goalActions,
     sessions,
     selectedSiteId: validatedSiteId,
     selectedTargetId: validatedTargetId,
+    selectedGoal: validatedGoal,
   }
 }
 

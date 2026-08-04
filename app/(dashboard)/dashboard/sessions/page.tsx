@@ -6,13 +6,14 @@ import { getSelectedSiteId } from "@/lib/selected-site"
 import { Button } from "@/components/ui/button"
 import { SessionsTable } from "./sessions-table"
 import { TargetFilter } from "./target-filter"
+import { GoalFilter } from "./goal-filter"
 
 export const metadata = {
   title: "Сессии — Вебмонитор",
 }
 
 type PageProps = {
-  searchParams: { site?: string; targetId?: string; sort?: string }
+  searchParams: { site?: string; targetId?: string; goal?: string; sort?: string }
 }
 
 export default async function SessionsPage({ searchParams }: PageProps) {
@@ -28,6 +29,7 @@ export default async function SessionsPage({ searchParams }: PageProps) {
   const data = await getSessionsForUser(session.user.id, {
     siteId: siteId ?? undefined,
     targetId: searchParams.targetId,
+    goal: searchParams.goal,
     sort,
   })
 
@@ -44,6 +46,14 @@ export default async function SessionsPage({ searchParams }: PageProps) {
             targets={data.targets}
             selectedTargetId={data.selectedTargetId}
             selectedSiteId={data.selectedSiteId}
+            selectedGoal={data.selectedGoal}
+            currentSort={sort}
+          />
+          <GoalFilter
+            goalActions={data.goalActions}
+            selectedGoal={data.selectedGoal}
+            selectedSiteId={data.selectedSiteId}
+            selectedTargetId={data.selectedTargetId}
             currentSort={sort}
           />
         </div>
@@ -56,8 +66,8 @@ export default async function SessionsPage({ searchParams }: PageProps) {
           sessions={data.sessions}
           selectedSiteId={data.selectedSiteId}
           selectedTargetId={data.selectedTargetId}
+          selectedGoal={data.selectedGoal}
           currentSort={sort}
-          showSite={data.sites.length > 1}
         />
       )}
     </div>

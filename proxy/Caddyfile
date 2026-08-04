@@ -1,0 +1,28 @@
+{
+    admin off
+    auto_https off
+}
+
+:8080 {
+    @noauth not header X-Proxy-Auth "{$PROXY_AUTH}"
+    handle @noauth {
+        header X-Webmon-Proxy "reject-auth"
+        respond `{"error":"proxy_auth_failed","source":"webmon-proxy"}` 403
+    }
+
+    @chat path /api/v1/chat/completions
+    handle @chat {
+        reverse_proxy https://openrouter.ai {
+            header_up Host openrouter.ai
+            header_up -X-Proxy-Auth
+            transport http {
+                read_timeout 180s
+                dial_timeout 10s
+            }
+        }
+    }
+
+    handle {
+        respond 404
+    }
+}

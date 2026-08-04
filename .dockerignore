@@ -22,3 +22,6 @@ __tests__/
 coverage/
 prisma/migrations/migration_lock.toml
 public/test.html
+
+# Fly AI-прокси — деплоится отдельно через flyctl, не часть контейнера
+proxy/

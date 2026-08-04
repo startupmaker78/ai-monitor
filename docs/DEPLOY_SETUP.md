@@ -404,10 +404,34 @@ GitHub Actions workflow: [.github/workflows/deploy.yml](../.github/workflows/dep
 
 1. Checkout
 2. Install yc CLI + auth via JSON-key из `YC_SA_JSON_CREDENTIALS`
-3. Configure Docker auth via `yc container registry configure-docker`
-4. Build and push Docker image (linux/amd64, GHA cache)
-5. Deploy revision via `yc serverless container revision deploy` (прямой CLI)
-6. Smoke test: /api/health, /, /login, /signup
+3. **Гейт: все миграции применены** (psql читает `_prisma_migrations`, red build если есть неприменённые — см. ниже)
+4. **Гейт: все секреты есть в запиннутой версии Lockbox** (red build если ключ из `SECRET_KEYS` отсутствует в `YC_LOCKBOX_VERSION_ID`)
+5. Configure Docker auth via `yc container registry configure-docker`
+6. Build and push Docker image (retry через `Wandalen/wretry`, linux/amd64, GHA cache)
+7. Deploy revision via `yc serverless container revision deploy` (прямой CLI)
+8. Smoke test: /api/health (liveness) + /api/health?deep=1 (контейнер→БД), /, /login, /signup, /tracker.js, collect
+
+## Миграции БД — ВРУЧНУЮ (важно) + CI-гейт
+
+`prisma migrate deploy` **НЕ в CI** (осознанно: `cancel-in-progress` + запись в
+прод-БД из CI — плохое сочетание; второй push мог бы убить migrate в середине).
+Миграции применяются **руками** с локальной машины ПЕРЕД пушем кода:
+
+```bash
+# DATABASE_URL из .env.local → staging Yandex Managed PG
+npm run prisma migrate deploy
+npm run prisma migrate status   # убедиться: "up to date"
+```
+
+Порядок: **БД → код** (аддитивная миграция создаётся первой; на работающий
+старый контейнер не влияет). Только потом пуш кода → деплой.
+
+**CI это ПРОВЕРЯЕТ (не применяет):** шаг «Гейт — все миграции применены»
+(deploy.yml) через `psql` читает `_prisma_migrations` на staging-БД и **валит
+билд**, если хоть одна миграция из `prisma/migrations/` не накатана. Сообщение
+в логе прямо говорит, что накатить. Так «забыл применить миграцию» ловится в CI
+красным, а не клиентом на дашборде. CI в БД **только читает** (доступ
+`github-actions-sa` к `DATABASE_URL` из Lockbox — см. DECISIONS 2026-08-04).
 
 **Почему yc CLI напрямую, а не yc-actions wrappers:** yc-actions/yc-sls-container-deploy@v4
 вызывает дополнительные API endpoints в pre-flight, на которые наш CI-SA

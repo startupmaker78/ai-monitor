@@ -18,6 +18,18 @@ env:
   YC_RUNTIME_SA_ID: aje8vk01bgb0ij6rfgan
   YC_CONTAINER_NAME: webmonitor-staging
   YC_LOCKBOX_SECRET_ID: e6q7u31vmglihgr4658s
+  # Запиннутая версия Lockbox. При добавлении/ротации секрета — залить новую
+  # версию и обновить ЭТОТ id (гейт «секреты в пине» ниже валит билд, если
+  # ключа из SECRET_KEYS нет в этой версии — не даёт секрету молча отстать).
+  YC_LOCKBOX_VERSION_ID: e6qhkba8rm49r4ht3dci
+  # Единый список ключей секретов — источник правды и для гейта наличия, и для
+  # деплой-шага (не дублируем, не разъезжаемся).
+  SECRET_KEYS: >-
+    DATABASE_URL AUTH_SECRET AUTH_URL YOS_BUCKET_NAME YOS_ENDPOINT YOS_REGION
+    YOS_ACCESS_KEY_ID YOS_SECRET_ACCESS_KEY YOS_PUBLIC_URL ANTHROPIC_API_KEY
+    OPENROUTER_API_KEY METRIKA_CLIENT_ID METRIKA_CLIENT_SECRET YOOKASSA_SHOP_ID
+    YOOKASSA_SECRET_KEY RESEND_API_KEY IP_HASH_SALT CRON_SECRET DEMO_USER_ID
+    MIN_SESSIONS_BUDGET AI_GATEWAY_AUTH AI_API_URL
   IMAGE_REPO: webmonitor
 
 jobs:
@@ -42,41 +54,95 @@ jobs:
           yc config set service-account-key "$KEY_FILE"
           yc config set folder-id ${{ env.YC_FOLDER_ID }}
 
+      # ГЕЙТ 1: все миграции применены на staging-БД. Read-only (psql читает
+      # _prisma_migrations, ничего не пишет). Без npm ci — psql предустановлен
+      # на ubuntu-latest, гейт лёгкий. Ловит «забыл накатить миграцию»: код не
+      # уедет впереди схемы, узнаем в CI, а не от клиента на дашборде.
+      # DATABASE_URL берём из Lockbox и маскируем — в лог не попадает.
+      - name: Гейт — все миграции применены
+        run: |
+          export PATH="$HOME/yc/bin:$PATH"
+          DB_URL=$(yc lockbox payload get --id ${{ env.YC_LOCKBOX_SECRET_ID }} --key DATABASE_URL)
+          echo "::add-mask::$DB_URL"
+          mkdir -p "$HOME/.postgresql"
+          cp scripts/yandex-root.crt "$HOME/.postgresql/root.crt"
+          export PGSSLMODE=verify-full
+          export PGSSLROOTCERT="$HOME/.postgresql/root.crt"
+          APPLIED=$(psql "$DB_URL" -tAc \
+            "SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL")
+          PENDING=""
+          for d in prisma/migrations/*/; do
+            name=$(basename "$d")
+            echo "$APPLIED" | grep -qxF "$name" || PENDING="$PENDING $name"
+          done
+          if [ -n "$PENDING" ]; then
+            echo "::error title=Неприменённые миграции::На staging-БД НЕ накатаны миграции:$PENDING. Деплой остановлен — код уехал бы впереди схемы. Накатите вручную: npm run prisma migrate deploy (см. docs/DEPLOY_SETUP.md), затем перезапустите деплой."
+            exit 1
+          fi
+          echo "✅ Все миграции применены."
+
+      # ГЕЙТ 2: каждый ключ из SECRET_KEYS присутствует в ЗАПИННУТОЙ версии
+      # Lockbox. Добавили секрет, но забыли залить новую версию / бампнуть
+      # YC_LOCKBOX_VERSION_ID → красный билд (иначе секрет молча отстал бы —
+      # почти наступили с DEMO_USER_ID). Значения не печатаем (>/dev/null).
+      - name: Гейт — все секреты есть в запиннутой версии Lockbox
+        run: |
+          export PATH="$HOME/yc/bin:$PATH"
+          # Один вызов + jq извлекает ТОЛЬКО ключи (значения в лог не попадают,
+          # jq их не выводит). Надёжнее 22 отдельных вызовов (нет пер-ключевого
+          # транзиента), и быстрее.
+          PRESENT=$(yc lockbox payload get --id ${{ env.YC_LOCKBOX_SECRET_ID }} \
+            --version-id ${{ env.YC_LOCKBOX_VERSION_ID }} --format json | jq -r '.entries[].key')
+          # Пустой ответ = Lockbox/сеть недоступны, а НЕ «все секреты пропали».
+          # Различаем явно, чтобы не выдать обманчивое «нет 22 ключей» на блипе.
+          if [ -z "$PRESENT" ]; then
+            echo "::error title=Lockbox недоступен::Не удалось прочитать версию ${{ env.YC_LOCKBOX_VERSION_ID }} секрета ${{ env.YC_LOCKBOX_SECRET_ID }} (пустой ответ). Это инфра-проблема (сеть/права/rate-limit), а не пропавшие секреты. Перезапустите деплой."
+            exit 1
+          fi
+          MISSING=""
+          for k in ${{ env.SECRET_KEYS }}; do
+            echo "$PRESENT" | grep -qxF "$k" || MISSING="$MISSING $k"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error title=Секрет не в пине::В версии Lockbox ${{ env.YC_LOCKBOX_VERSION_ID }} нет ключей:$MISSING. Залейте их в Lockbox и обновите YC_LOCKBOX_VERSION_ID в deploy.yml — иначе секрет молча не подхватится."
+            exit 1
+          fi
+          echo "✅ Все ${{ env.SECRET_KEYS }} присутствуют в пине."
+
       - name: Configure Docker auth via yc CLI
         run: yc container registry configure-docker
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+      # Retry вокруг uses:-шагов (nick-fields/retry умеет только shell). Флейк
+      # был именно тут: setup-buildx тянет moby/buildkit из Docker Hub и ловил
+      # «connection reset». Зеркало base-образа в YC Registry — если повторится.
+      - name: Set up Docker Buildx (retry)
+        uses: Wandalen/wretry.action@v3.8.0
         with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:${{ github.sha }}
-            cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          action: docker/setup-buildx-action@v3
+          attempt_limit: 3
+          attempt_delay: 10000
+
+      - name: Build and push Docker image (retry)
+        uses: Wandalen/wretry.action@v3.8.0
+        with:
+          action: docker/build-push-action@v6
+          attempt_limit: 3
+          attempt_delay: 15000
+          # tags через запятую (не многострочный |) — with передаётся строкой.
+          with: |
+            context: .
+            file: ./Dockerfile
+            push: true
+            platforms: linux/amd64
+            tags: cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:${{ github.sha }},cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:latest
+            cache-from: type=gha
+            cache-to: type=gha,mode=max
 
       - name: Deploy Serverless Container revision via yc CLI
         run: |
           SECRET_ARGS=""
-          for k in DATABASE_URL AUTH_SECRET AUTH_URL \
-                   YOS_BUCKET_NAME YOS_ENDPOINT YOS_REGION \
-                   YOS_ACCESS_KEY_ID YOS_SECRET_ACCESS_KEY YOS_PUBLIC_URL \
-                   ANTHROPIC_API_KEY OPENROUTER_API_KEY \
-                   METRIKA_CLIENT_ID METRIKA_CLIENT_SECRET \
-                   YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY \
-                   RESEND_API_KEY IP_HASH_SALT \
-                   CRON_SECRET \
-                   DEMO_USER_ID \
-                   MIN_SESSIONS_BUDGET \
-                   AI_GATEWAY_AUTH \
-                   AI_API_URL; do
-            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},version-id=e6qhkba8rm49r4ht3dci,key=$k,environment-variable=$k"
+          for k in ${{ env.SECRET_KEYS }}; do
+            SECRET_ARGS="$SECRET_ARGS --secret id=${{ env.YC_LOCKBOX_SECRET_ID }},version-id=${{ env.YC_LOCKBOX_VERSION_ID }},key=$k,environment-variable=$k"
           done
 
           eval yc serverless container revision deploy \
@@ -94,11 +160,25 @@ jobs:
         run: |
           CONTAINER_URL="https://bbarn8gnskqll4cjnkhm.containers.yandexcloud.net"
 
-          echo "=== Health check ==="
+          echo "=== Health check (liveness) ==="
           sleep 10
           curl -fsS -o /tmp/health.json -w "Status: %{http_code}\n" \
             "$CONTAINER_URL/api/health" || (echo "HEALTH FAILED"; cat /tmp/health.json; exit 1)
           cat /tmp/health.json
+
+          echo ""
+          echo "=== Health check (deep — контейнер→БД) ==="
+          # ?deep=1 пингует БД (SELECT 1). Ловит «контейнер не достаёт БД»
+          # (SSL-cert/секрет/сеть) на пути контейнер→БД — иное, чем гейт
+          # миграций из раннера. Всегда 200 → проверяем "db":"ok" в теле.
+          curl -fsS -o /tmp/health-deep.json "$CONTAINER_URL/api/health?deep=1" \
+            || (echo "HEALTH DEEP FAILED"; exit 1)
+          cat /tmp/health-deep.json
+          if ! grep -q '"db":"ok"' /tmp/health-deep.json; then
+            echo "DB CHECK FAILED — контейнер не достучался до БД (см. тело выше)"
+            exit 1
+          fi
+          echo "DB reachable from container: OK"
 
           echo ""
           echo "=== Landing / ==="

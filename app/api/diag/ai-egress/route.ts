@@ -51,10 +51,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch {
     /* тела может не быть — только egress */
   }
-  const { url, cfAuth, proxyAuth, long } = (body ?? {}) as {
+  const { url, cfAuth, long } = (body ?? {}) as {
     url?: string
     cfAuth?: string // cf-aig токен (тест CF-гейта)
-    proxyAuth?: string // X-Proxy-Auth (тест Fly-прокси); передаём в теле, в Lockbox — на этапе переезда
     long?: boolean // true → ДЛИННАЯ генерация ~60-90с (проверка idle-таймаута прокси)
   }
 
@@ -90,6 +89,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       "X-Title": "Webmonitor",
     }
     if (cfAuth) headers["cf-aig-authorization"] = `Bearer ${cfAuth}`
+    // X-Proxy-Auth для Fly-прокси — из env (AI_PROXY_AUTH инжектится деплоем
+    // через --secret), НЕ из тела запроса: токен не светится в переписке/history.
+    const proxyAuth = process.env.AI_PROXY_AUTH
     if (proxyAuth) headers["X-Proxy-Auth"] = proxyAuth
 
     // long=true форсирует большой ответ (~60-90с) → проверяет idle-таймаут

@@ -1,6 +1,7 @@
 import Link from "next/link"
 import type { SessionsForUser } from "@/lib/sessions-data"
 import { GoalColumnInfo } from "./goal-column-info"
+import { ActivityColumnInfo } from "./activity-column-info"
 import { SessionRow } from "./session-row"
 
 type Props = {
@@ -61,11 +62,14 @@ export function SessionsTable({
               <span className="sr-only">Устройство</span>
             </th>
             <th className="px-3 py-3 font-medium">Длительность</th>
-            <th className="px-3 py-3 font-medium">Активность</th>
+            <th className="px-3 py-3 font-medium whitespace-nowrap">
+              <span className="align-middle">Активность</span>
+              <ActivityColumnInfo />
+            </th>
             {showTarget && <th className="px-3 py-3 font-medium">Страница</th>}
             {showGoal && (
-              <th className="px-3 py-3 font-medium">
-                <span className="align-middle">Целевое действие страницы</span>
+              <th className="px-3 py-3 font-medium whitespace-nowrap">
+                <span className="align-middle">Целевое действие</span>
                 <GoalColumnInfo />
               </th>
             )}

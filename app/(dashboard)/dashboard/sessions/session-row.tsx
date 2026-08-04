@@ -100,7 +100,7 @@ export function SessionRow({
           {s.analysisTarget ? (
             <span
               title={s.analysisTarget.name ?? s.analysisTarget.url}
-              className="block max-w-[11rem] truncate"
+              className="block max-w-[16rem] truncate"
             >
               {s.analysisTarget.name ?? s.analysisTarget.url}
             </span>
@@ -114,7 +114,7 @@ export function SessionRow({
           {s.analysisTarget?.metrikaGoalName ? (
             <span
               title={s.analysisTarget.metrikaGoalName}
-              className="block max-w-[10rem] truncate text-muted-foreground"
+              className="block max-w-[11rem] truncate text-muted-foreground"
             >
               {s.analysisTarget.metrikaGoalName}
             </span>

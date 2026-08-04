@@ -119,7 +119,10 @@ export default async function DashboardLayout({
       </Sidebar>
 
       <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+        {/* px-4 md:px-6 — совпадает с горизонтальным паддингом <main> (p-4
+            md:p-6), иначе правый край хедера (селектор сайта) не совпадал с
+            правым краем контента/таблицы. Общий хедер → фикс на всех страницах. */}
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:px-6">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="h-4" />
           <HeaderTitle />

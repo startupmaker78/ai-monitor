@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { getConnectionStatus } from "@/lib/connection-status"
+import { getSelectedSiteId } from "@/lib/selected-site"
 import { toUnicodeDomain } from "@/lib/domain-display"
 import { SitesClient } from "./sites-client"
 
@@ -16,6 +17,9 @@ export default async function SitesPage() {
     select: { id: true },
   })
   if (!op) redirect("/login")
+
+  // Выбранный сайт (глобальный селектор, cookie) — карточка показывает его.
+  const selectedId = await getSelectedSiteId(session.user.id)
 
   const sites = await prisma.site.findMany({
     where: { ownerId: op.id, isDemo: false },
@@ -44,5 +48,11 @@ export default async function SitesPage() {
     displayDomain: toUnicodeDomain(s.domain),
   }))
 
-  return <SitesClient initialSites={sitesForClient} statuses={statuses} />
+  return (
+    <SitesClient
+      initialSites={sitesForClient}
+      statuses={statuses}
+      selectedId={selectedId}
+    />
+  )
 }

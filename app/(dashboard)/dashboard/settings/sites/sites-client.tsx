@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
@@ -13,6 +13,7 @@ import {
   Plus,
 } from "lucide-react"
 import type { ConnectionStatus } from "@/lib/connection-status"
+import { setSelectedSite } from "@/app/(dashboard)/site-actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -38,9 +39,10 @@ type Site = {
 type Props = {
   initialSites: Site[]
   statuses: Record<string, ConnectionStatus>
+  selectedId: string | null
 }
 
-export function SitesClient({ initialSites, statuses }: Props) {
+export function SitesClient({ initialSites, statuses, selectedId }: Props) {
   const router = useRouter()
   const [domain, setDomain] = useState("")
   const [name, setName] = useState("")
@@ -48,6 +50,17 @@ export function SitesClient({ initialSites, statuses }: Props) {
   const [createError, setCreateError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [showOthers, setShowOthers] = useState(false)
+  const [switching, startSwitch] = useTransition()
+
+  // Переключить выбранный сайт (как хедер-селектор): пишет cookie + refresh →
+  // сервер отдаёт карточку нового выбранного сайта.
+  function switchSite(id: string) {
+    startSwitch(async () => {
+      await setSelectedSite(id)
+      router.refresh()
+    })
+  }
   // Форма добавления свёрнута в кнопку. Исключение — ноль сайтов: это первый
   // шаг онбординга, прятать нельзя.
   const hasSites = initialSites.filter((s) => !s.isDemo).length > 0
@@ -122,6 +135,12 @@ export function SitesClient({ initialSites, statuses }: Props) {
   // Defensive filter: демо-сайтов больше не должно быть, но если что-то
   // останется — не рендерим.
   const visibleSites = initialSites.filter((s) => !s.isDemo)
+  // Карточка = выбранный сайт (селектор в хедере). Остальные — под ссылкой.
+  const selectedSite =
+    visibleSites.find((s) => s.id === selectedId) ?? visibleSites[0]
+  const others = selectedSite
+    ? visibleSites.filter((s) => s.id !== selectedSite.id)
+    : []
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -216,24 +235,78 @@ export function SitesClient({ initialSites, statuses }: Props) {
         </div>
       )}
 
-      {/* Список сайтов — полный (все сайты), селектор в хедере на этом экране
-          скрыт (см. site-switcher). Смотрят постоянно. */}
-      {visibleSites.length > 0 && (
-        <div className="space-y-3">
-          {visibleSites.map((site) => (
-            <SiteCard
-              key={site.id}
-              site={site}
-              status={statuses[site.id]}
-              copied={copiedId === site.id}
-              onCopy={() => handleCopy(site)}
-              onDelete={() => handleDelete(site)}
-            />
-          ))}
+      {/* Карточка ВЫБРАННОГО сайта (селектор в хедере переключает). */}
+      {selectedSite && (
+        <SiteCard
+          key={selectedSite.id}
+          site={selectedSite}
+          status={statuses[selectedSite.id]}
+          copied={copiedId === selectedSite.id}
+          onCopy={() => handleCopy(selectedSite)}
+          onDelete={() => handleDelete(selectedSite)}
+        />
+      )}
+
+      {/* Ссылка на остальные сайты — только если их больше одного. Не отдельный
+          роут: прячем список, чтобы тут же дать на него ссылку — раскрываем
+          прямо здесь. Клик по строке переключает выбранный сайт. */}
+      {others.length > 0 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowOthers((v) => !v)}
+            className="flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            {showOthers ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+            Посмотреть все подключённые сайты ({visibleSites.length})
+          </button>
+
+          {showOthers && (
+            <div className="mt-2 divide-y rounded-md border">
+              {others.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  disabled={switching}
+                  onClick={() => switchSite(s.id)}
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted/50 disabled:opacity-60"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium">
+                      {s.displayDomain}
+                    </span>
+                    {s.name && (
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {s.name}
+                      </span>
+                    )}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {statusPhrase(statuses[s.id])}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
   )
+}
+
+// Статус подключения сайта одной фразой (для компактного списка остальных).
+function statusPhrase(status?: ConnectionStatus): string {
+  if (!status) return ""
+  if (status.trackerActive && status.metrikaConfigured && status.syncHasData) {
+    return "Всё подключено"
+  }
+  if (!status.trackerActive) return "Трекер не подключён"
+  if (!status.metrikaConfigured) return "Метрика не подключена"
+  return "Ждём данные Метрики"
 }
 
 function StatusRow({

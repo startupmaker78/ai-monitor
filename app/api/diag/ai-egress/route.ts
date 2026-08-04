@@ -53,7 +53,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch {
     /* тела может не быть — только egress */
   }
-  const { url, cfAuth, long, prodpath, preS3, siteId } = (body ?? {}) as {
+  const { url, cfAuth, long, prodpath, preS3, siteId, preMetrika } = (body ?? {}) as {
     url?: string
     cfAuth?: string // cf-aig токен (тест CF-гейта)
     long?: boolean // true → ДЛИННАЯ генерация ~60-90с (проверка idle-таймаута прокси)

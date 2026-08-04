@@ -51,12 +51,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch {
     /* тела может не быть — только egress */
   }
-  const { url, cfAuth } = (body ?? {}) as { url?: string; cfAuth?: string }
+  const { url, cfAuth, proxyAuth, long } = (body ?? {}) as {
+    url?: string
+    cfAuth?: string // cf-aig токен (тест CF-гейта)
+    proxyAuth?: string // X-Proxy-Auth (тест Fly-прокси); передаём в теле, в Lockbox — на этапе переезда
+    long?: boolean // true → ДЛИННАЯ генерация ~60-90с (проверка idle-таймаута прокси)
+  }
+
+  // SSRF-гард: только известные AI-эндпоинты (CF-гейт и наш Fly-прокси).
+  const ALLOWED_HOSTS = ["gateway.ai.cloudflare.com", "webmon-ai-proxy.fly.dev"]
 
   let gatewayTest:
-    | { status: number; ok: boolean; body: string; host: string }
+    | { status: number; ok: boolean; body: string; host: string; ms: number }
     | { skipped: string }
-    | { error: string } = { skipped: "url/cfAuth не переданы — только egress" }
+    | { error: string; ms?: number } = { skipped: "url не передан — только egress" }
 
   if (url) {
     let host = ""
@@ -65,9 +73,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch {
       return NextResponse.json({ egress, error: "url невалиден" }, { status: 400 })
     }
-    if (host !== "gateway.ai.cloudflare.com") {
+    if (!ALLOWED_HOSTS.includes(host)) {
       return NextResponse.json(
-        { egress, error: `хост ${host} запрещён (только gateway.ai.cloudflare.com)` },
+        { egress, error: `хост ${host} запрещён (только ${ALLOWED_HOSTS.join(", ")})` },
         { status: 400 },
       )
     }
@@ -82,20 +90,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       "X-Title": "Webmonitor",
     }
     if (cfAuth) headers["cf-aig-authorization"] = `Bearer ${cfAuth}`
-    try {
-      const r = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
+    if (proxyAuth) headers["X-Proxy-Auth"] = proxyAuth
+
+    // long=true форсирует большой ответ (~60-90с) → проверяет idle-таймаут
+    // прокси, а не только гео. 5 токенов вернулись бы за секунду = ложно-зелёно.
+    const payload = long
+      ? {
+          model: process.env.AI_MODEL ?? "anthropic/claude-opus-4-7",
+          max_tokens: 4000,
+          messages: [
+            {
+              role: "user",
+              content:
+                "Напиши максимально подробное эссе не менее чем на 3000 слов " +
+                "об истории и принципах веб-аналитики. Развёрнуто, без сокращений.",
+            },
+          ],
+        }
+      : {
           model: process.env.AI_MODEL ?? "anthropic/claude-opus-4-7",
           max_tokens: 5,
           messages: [{ role: "user", content: "ping" }],
-        }),
-      })
+        }
+
+    const started = Date.now()
+    try {
+      const r = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) })
       const text = await r.text().catch(() => "")
-      gatewayTest = { status: r.status, ok: r.ok, body: redact(text), host }
+      const ms = Date.now() - started
+      gatewayTest = { status: r.status, ok: r.ok, body: redact(text), host, ms }
     } catch (e) {
-      gatewayTest = { error: `fetch failed: ${(e as Error).message}` }
+      const ms = Date.now() - started
+      gatewayTest = { error: `fetch failed: ${(e as Error).message}`, ms }
     }
   }
 

@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import ReactMarkdown from "react-markdown"
 import rehypeSlug from "rehype-slug"
 import guideMd from "@/docs/metrika-goals-guide.md"
+import { WebmonitorTracker } from "@/components/webmonitor-tracker"
 
 export const metadata: Metadata = {
   title: "Настройка целей Метрики — Вебмонитор",
@@ -73,6 +74,8 @@ const mdComponents = {
 export default function GuideMetrikaPage() {
   return (
     <div className="min-h-screen bg-background">
+      {/* TEST: наш трекер на публичном /guide/metrika. */}
+      <WebmonitorTracker />
       <header className="border-b">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
           <Link href="/" className="flex items-center gap-2">

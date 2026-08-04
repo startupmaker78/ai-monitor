@@ -11,6 +11,7 @@ import { TargetsList } from "@/components/dashboard/targets-list"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { YandexMetrika } from "@/components/yandex-metrika"
+import { WebmonitorTracker } from "@/components/webmonitor-tracker"
 
 export const metadata = {
   title: "Демо — Вебмонитор",
@@ -23,8 +24,9 @@ export default async function DemoPage() {
   if (!demoUserId) {
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
-        {/* TEST: счётчик Метрики и в фолбэк-ветках /demo (разведка btn). */}
+        {/* TEST: счётчик Метрики + наш трекер в фолбэк-ветках /demo. */}
         <YandexMetrika />
+        <WebmonitorTracker />
         <Card>
           <CardContent className="max-w-md py-12 text-center">
             <p className="text-muted-foreground">
@@ -41,8 +43,9 @@ export default async function DemoPage() {
   if (!data) {
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
-        {/* TEST: счётчик Метрики и в фолбэк-ветках /demo (разведка btn). */}
+        {/* TEST: счётчик Метрики + наш трекер в фолбэк-ветках /demo. */}
         <YandexMetrika />
+        <WebmonitorTracker />
         <Card>
           <CardContent className="max-w-md py-12 text-center">
             <p className="text-muted-foreground">
@@ -56,8 +59,9 @@ export default async function DemoPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* TEST: счётчик Метрики на публичном /demo (разведка btn-целей). */}
+      {/* TEST: счётчик Метрики + наш трекер на публичном /demo. */}
       <YandexMetrika />
+      <WebmonitorTracker />
       <div className="border-b bg-primary text-primary-foreground">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-3 px-4 py-3 sm:flex-row sm:items-center">
           <div className="flex items-center gap-2">

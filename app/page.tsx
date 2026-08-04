@@ -1,12 +1,14 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { YandexMetrika } from "@/components/yandex-metrika"
+import { WebmonitorTracker } from "@/components/webmonitor-tracker"
 
 export default function LandingPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-4 py-12">
-      {/* TEST: счётчик Метрики на публичном лендинге (разведка btn-целей). */}
+      {/* TEST: счётчик Метрики + наш трекер на публичном лендинге. */}
       <YandexMetrika />
+      <WebmonitorTracker />
       <div className="w-full max-w-2xl text-center">
         <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
           Вебмонитор

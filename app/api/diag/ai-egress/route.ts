@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-// ВРЕМЕННЫЙ диагност-роут (удалить после проверки CF-гейта). Нужен, потому что
+// ВРЕМЕННЫЙ диагност-роут /api/diag/ai-egress (удалить после проверки
+// CF-гейта). NB: папка НЕ с префиксом «_» — в App Router «_folder» приватная и
+// не роутится. Нужен, потому что
 // в serverless-контейнер нельзя зайти (нет exec), а тест обязан идти egress'ом
 // КОНТЕЙНЕРА (РФ-IP), не с машины разработчика. Делает ровно то, что просили
 // вручную: (1) показывает, каким IP/страной видит контейнер Cloudflare;

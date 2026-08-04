@@ -202,6 +202,7 @@ export function GoalSelect({
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<SiteGoalsResult | null>(null)
   const [showAuto, setShowAuto] = useState(false)
+  const [showDead, setShowDead] = useState(false)
   const [relevance, setRelevance] = useState<GoalRelevance | null>(null)
 
   // Релевантность (3 вызова) — ТОЛЬКО для выбранной action-цели при известной
@@ -303,55 +304,108 @@ export function GoalSelect({
                 В счётчике нет пользовательских целей.
               </div>
             )}
-            {/* Видимый список = пользовательские + ИЗБРАННЫЕ авто-цели (клиент
-                отметил ключевыми — не прячем в свёрнутой группе). */}
-            {[...data.user, ...data.auto.filter((g) => g.isFavorite)]
-              .sort(byRelevance(pageUrl))
-              .map((g) => (
-                <GoalRow
-                  key={g.id}
-                  goal={g}
-                  selected={g.id === currentGoalId}
-                  pageUrl={pageUrl}
-                  onPick={pick}
-                />
-              ))}
+            {/* Primary = пользовательские + ИЗБРАННЫЕ авто (клиент отметил
+                ключевыми). Делим на живые (видны сразу) и мёртвые (0 достижений
+                за период → свёрнуты). Сворачиваем ПО ФАКТУ «анализировать
+                нечего», а не по «релевантности» — типы/уместность не прячем,
+                бейджи их и так объясняют. */}
+            {(() => {
+              const primary = [
+                ...data.user,
+                ...data.auto.filter((g) => g.isFavorite),
+              ]
+              const live = primary
+                .filter((g) => g.reaches > 0)
+                .sort(byRelevance(pageUrl))
+              const dead = primary
+                .filter((g) => g.reaches === 0)
+                .sort(byRelevance(pageUrl))
+              const autoRest = data.auto.filter((g) => !g.isFavorite)
+              return (
+                <>
+                  {live.map((g) => (
+                    <GoalRow
+                      key={g.id}
+                      goal={g}
+                      selected={g.id === currentGoalId}
+                      pageUrl={pageUrl}
+                      onPick={pick}
+                    />
+                  ))}
 
-            {data.auto.filter((g) => !g.isFavorite).length > 0 && (
-              <>
-                <DropdownMenuSeparator />
-                {!showAuto ? (
-                  <DropdownMenuItem
-                    onSelect={(e) => {
-                      e.preventDefault() // не закрывать меню — просто раскрыть
-                      setShowAuto(true)
-                    }}
-                    className="text-sm text-muted-foreground"
-                  >
-                    ▸ Автоцели Метрики (
-                    {data.auto.filter((g) => !g.isFavorite).length}) — показать
-                  </DropdownMenuItem>
-                ) : (
-                  <>
-                    <DropdownMenuLabel className="text-xs font-normal normal-case text-muted-foreground">
-                      Автоцели — Метрика создала их сама (соцсети, телефон,
-                      формы)
-                    </DropdownMenuLabel>
-                    {data.auto
-                      .filter((g) => !g.isFavorite)
-                      .map((g) => (
-                        <GoalRow
-                          key={g.id}
-                          goal={g}
-                          selected={g.id === currentGoalId}
-                          pageUrl={pageUrl}
-                          onPick={pick}
-                        />
-                      ))}
-                  </>
-                )}
-              </>
-            )}
+                  {/* Мёртвые — свёрнуты, как автоцели. Внутри бейдж «не
+                      срабатывала» НЕ дублируем (hideDeadBadge) — заголовок
+                      группы это и говорит. Избранная мёртвая (★) остаётся тут
+                      со звездой: звезда бьёт эвристики, но не бьёт ноль. */}
+                  {dead.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {!showDead ? (
+                        <DropdownMenuItem
+                          onSelect={(e) => {
+                            e.preventDefault()
+                            setShowDead(true)
+                          }}
+                          className="text-sm text-muted-foreground"
+                        >
+                          ▸ Не срабатывали за период ({dead.length}) — показать
+                        </DropdownMenuItem>
+                      ) : (
+                        <>
+                          <DropdownMenuLabel className="text-xs font-normal normal-case text-muted-foreground">
+                            Не срабатывали за период — 0 достижений,
+                            анализировать нечего
+                          </DropdownMenuLabel>
+                          {dead.map((g) => (
+                            <GoalRow
+                              key={g.id}
+                              goal={g}
+                              selected={g.id === currentGoalId}
+                              pageUrl={pageUrl}
+                              onPick={pick}
+                              hideDeadBadge
+                            />
+                          ))}
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {autoRest.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {!showAuto ? (
+                        <DropdownMenuItem
+                          onSelect={(e) => {
+                            e.preventDefault() // не закрывать меню — просто раскрыть
+                            setShowAuto(true)
+                          }}
+                          className="text-sm text-muted-foreground"
+                        >
+                          ▸ Автоцели Метрики ({autoRest.length}) — показать
+                        </DropdownMenuItem>
+                      ) : (
+                        <>
+                          <DropdownMenuLabel className="text-xs font-normal normal-case text-muted-foreground">
+                            Автоцели — Метрика создала их сама (соцсети, телефон,
+                            формы)
+                          </DropdownMenuLabel>
+                          {autoRest.map((g) => (
+                            <GoalRow
+                              key={g.id}
+                              goal={g}
+                              selected={g.id === currentGoalId}
+                              pageUrl={pageUrl}
+                              onPick={pick}
+                            />
+                          ))}
+                        </>
+                      )}
+                    </>
+                  )}
+                </>
+              )
+            })()}
           </>
         )}
         {/* Нейтральная help-ссылка (не бейдж-предупреждение): подвал меню, не
@@ -406,13 +460,19 @@ function GoalRow({
   selected,
   pageUrl,
   onPick,
+  hideDeadBadge = false,
 }: {
   goal: GoalWithReaches
   selected: boolean
   pageUrl?: string
   onPick: (g: GoalWithReaches) => void
+  // Внутри свёрнутой группы «Не срабатывали» бейдж про 0 достижений избыточен
+  // (заголовок группы это говорит). Для reaches=0 goalWarning всегда вернёт
+  // именно его, поэтому глушим весь бейдж — других сигналов у мёртвой нет.
+  hideDeadBadge?: boolean
 }) {
-  const warning = goalWarning(goal, pageUrl)
+  const warning =
+    hideDeadBadge && goal.reaches === 0 ? null : goalWarning(goal, pageUrl)
   return (
     <DropdownMenuItem
       onSelect={() => onPick(goal)}

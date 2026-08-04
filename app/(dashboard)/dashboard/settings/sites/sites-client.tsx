@@ -125,39 +125,29 @@ export function SitesClient({ initialSites, statuses }: Props) {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight">Сайты</h2>
-        <p className="mt-1 text-muted-foreground">
-          Подключите свой сайт чтобы Вебмонитор начал собирать сессии и
-          анализировать их с помощью AI.
-        </p>
+      {/* Кнопка «Добавить сайт» — вверху рядом с заголовком справа (добавляют
+          редко, но действие должно быть на виду). Форма раскрывается по клику;
+          при нуле сайтов formOpen=true (первый шаг онбординга — не прячем). */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">Сайты</h2>
+          <p className="mt-1 text-muted-foreground">
+            Подключите свой сайт чтобы Вебмонитор начал собирать сессии и
+            анализировать их с помощью AI.
+          </p>
+        </div>
+        {!formOpen && (
+          <Button
+            variant="outline"
+            className="shrink-0"
+            onClick={() => setFormOpen(true)}
+          >
+            <Plus className="mr-1 h-4 w-4" /> Добавить сайт
+          </Button>
+        )}
       </div>
 
-      {deleteError && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-          {deleteError}
-        </div>
-      )}
-
-      {/* Список сайтов — сразу под заголовком (смотрят постоянно). */}
-      {visibleSites.length > 0 && (
-        <div className="space-y-3">
-          {visibleSites.map((site) => (
-            <SiteCard
-              key={site.id}
-              site={site}
-              status={statuses[site.id]}
-              copied={copiedId === site.id}
-              onCopy={() => handleCopy(site)}
-              onDelete={() => handleDelete(site)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Форма добавления — свёрнута в кнопку (добавляют редко). При нуле
-          сайтов formOpen=true (первый шаг онбординга — не прячем). */}
-      {formOpen ? (
+      {formOpen && (
         <Card>
           <CardHeader>
             <CardTitle>Добавить сайт</CardTitle>
@@ -218,10 +208,29 @@ export function SitesClient({ initialSites, statuses }: Props) {
             </form>
           </CardContent>
         </Card>
-      ) : (
-        <Button variant="outline" onClick={() => setFormOpen(true)}>
-          <Plus className="mr-1 h-4 w-4" /> Добавить сайт
-        </Button>
+      )}
+
+      {deleteError && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+          {deleteError}
+        </div>
+      )}
+
+      {/* Список сайтов — полный (все сайты), селектор в хедере на этом экране
+          скрыт (см. site-switcher). Смотрят постоянно. */}
+      {visibleSites.length > 0 && (
+        <div className="space-y-3">
+          {visibleSites.map((site) => (
+            <SiteCard
+              key={site.id}
+              site={site}
+              status={statuses[site.id]}
+              copied={copiedId === site.id}
+              onCopy={() => handleCopy(site)}
+              onDelete={() => handleDelete(site)}
+            />
+          ))}
+        </div>
       )}
     </div>
   )
@@ -253,21 +262,9 @@ function StatusRow({
 }
 
 // Виджет статуса подключения. Только DB-сигналы (getConnectionStatus).
-// Незакрытые пункты ведут к действию. Всё зелёное → сворачивается в одну
-// зелёную строку. Цели/«живость» не тащим (стоят вызовов Метрики).
+// ВСЕГДА три строки (включая зелёные) — статус виден постоянно, не
+// сворачивается. Незакрытые пункты ведут к действию. Цели/«живость» не тащим.
 function ConnectionStatusWidget({ status }: { status: ConnectionStatus }) {
-  const allGreen =
-    status.trackerActive && status.metrikaConfigured && status.syncHasData
-
-  if (allGreen) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
-        <CheckCircle2 className="h-4 w-4 shrink-0" />
-        Всё подключено — данные собираются.
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-2 rounded-md border bg-muted/40 p-3">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -335,59 +332,44 @@ function SiteCard({
       status.metrikaConfigured &&
       status.syncHasData,
   )
-  // Всё подключено → свёрнуто в строку (смотрят постоянно, настраивать нечего).
-  // Что-то не закрыто → развёрнуто (юзеру есть что делать — не прячем).
-  const [open, setOpen] = useState(false)
-  const showDetails = !allGreen || open
+  // Статус ВСЕГДА виден. Сворачивается только КОД трекера: он нужен один раз
+  // при настройке, а места занимает много. Всё подключено → код свёрнут (по
+  // клику разворачивается). Не всё → код показан (трекер ещё не стоит).
+  const [codeOpen, setCodeOpen] = useState(false)
+  const showCode = !allGreen || codeOpen
   const snippet = buildTrackerSnippet(site.trackingToken)
 
   return (
     <Card>
       <CardContent className="space-y-4 p-4">
-        {allGreen ? (
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            className="flex w-full items-center gap-2 text-left"
-          >
-            {open ? (
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-lg font-semibold">
-                {site.displayDomain}
-              </span>
-              {site.name && (
-                <span className="block truncate text-sm text-muted-foreground">
-                  {site.name}
-                </span>
-              )}
-            </span>
-            <span className="ml-auto flex shrink-0 items-center gap-1 text-sm text-green-600">
-              <CheckCircle2 className="h-4 w-4" /> Всё подключено
-            </span>
-          </button>
-        ) : (
-          <div className="min-w-0">
-            <h3 className="truncate text-lg font-semibold">
-              {site.displayDomain}
-            </h3>
-            {site.name && (
-              <p className="truncate text-sm text-muted-foreground">
-                {site.name}
-              </p>
-            )}
-          </div>
-        )}
+        <div className="min-w-0">
+          <h3 className="truncate text-lg font-semibold">
+            {site.displayDomain}
+          </h3>
+          {site.name && (
+            <p className="truncate text-sm text-muted-foreground">
+              {site.name}
+            </p>
+          )}
+        </div>
 
-        {!allGreen && status && <ConnectionStatusWidget status={status} />}
+        {status && <ConnectionStatusWidget status={status} />}
 
-        {showDetails && (
+        {showCode ? (
           <>
             <div className="space-y-2">
-              <p className="text-sm font-medium">Код для вставки на сайт</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">Код для вставки на сайт</p>
+                {allGreen && (
+                  <button
+                    type="button"
+                    onClick={() => setCodeOpen(false)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" /> Скрыть
+                  </button>
+                )}
+              </div>
               {/* whitespace-pre-wrap+break-all: длинный сниппет переносится
                   целиком, не обрезается справа. Копируется всегда полностью. */}
               <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">
@@ -422,6 +404,14 @@ function SiteCard({
               </button>
             </div>
           </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCodeOpen(true)}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ChevronRight className="h-4 w-4" /> Показать код трекера
+          </button>
         )}
       </CardContent>
     </Card>

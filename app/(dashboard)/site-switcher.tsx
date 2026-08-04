@@ -1,13 +1,19 @@
 "use client"
 
 import { useTransition } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { setSelectedSite } from "./site-actions"
 import type { OwnerSiteLite } from "@/lib/selected-site"
 
+// Экран, где селектор скрыт: «Сайты» показывает ПОЛНЫЙ список (что у меня
+// вообще есть), селектор отвечает на «что я сейчас смотрю» — разные задачи.
+// Скрытие только не рендерит дропдаун; cookie wm_site не трогается, выбор
+// сохраняется при уходе с экрана.
+const HIDE_ON = "/dashboard/settings/sites"
+
 // Глобальный переключатель сайта в хедере дашборда — единственный источник
 // выбора (локальные SiteSelector убраны). Пишет cookie через server-action +
-// router.refresh(). Скрыт при одном сайте (нечего переключать).
+// router.refresh(). Скрыт при одном сайте (нечего переключать) и на «Сайтах».
 export function SiteSwitcher({
   sites,
   selectedId,
@@ -16,9 +22,11 @@ export function SiteSwitcher({
   selectedId: string | null
 }) {
   const router = useRouter()
+  const pathname = usePathname()
   const [pending, startTransition] = useTransition()
 
   if (sites.length <= 1) return null
+  if (pathname === HIDE_ON) return null
 
   return (
     <select

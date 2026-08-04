@@ -60,6 +60,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     prodpath?: boolean // true → воспроизвести БОЕВОЙ путь (env AI_API_URL + callClaude)
     preS3?: boolean // true → реальные S3-чтения (тот же keepAlive-клиент), ПОТОМ callClaude
     siteId?: string // префикс для preS3: sessions/<siteId>/
+    preMetrika?: boolean // true → undici-GET к api-metrika.yandex.net, ПОТОМ callClaude
+  }
+
+  // Воспроизведение: сетевой вызов Метрики (последний перед callClaude в
+  // runAnalysis) ПЕРЕД callClaude. Dummy-токен → 401/403, важна сама undici-
+  // активность к yandex-хосту. Если после неё callClaude падает — виновник тут.
+  if (preMetrika) {
+    const m: { status?: number; ms?: number; error?: string } = {}
+    const t0 = Date.now()
+    try {
+      const r = await fetch(
+        "https://api-metrika.yandex.net/stat/v1/data/bytime?id=1&metrics=ym:s:visits",
+        { method: "GET", headers: { Authorization: "OAuth diagdummy", Accept: "application/json" } },
+      )
+      await r.text().catch(() => "")
+      m.status = r.status
+      m.ms = Date.now() - t0
+    } catch (e) {
+      m.error = (e as Error).message
+      m.ms = Date.now() - t0
+    }
+    const t1 = Date.now()
+    const cc = await callClaude({ system: "Ты аналитик.", messages: [{ role: "user", content: "Проанализируй сессию. ".repeat(600) }], maxTokens: 50 })
+    const ccOut = cc.ok
+      ? { ok: true, ms: Date.now() - t1, textLen: cc.text.length }
+      : { ok: false, ms: Date.now() - t1, error: cc.error, details: redact(cc.details ?? "") }
+    return NextResponse.json({ egress, metrika: m, callClaude: ccOut })
   }
 
   // Воспроизведение: S3-активность (как сбор сессий) ПЕРЕД callClaude. Если

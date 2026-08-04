@@ -320,16 +320,21 @@ export function TargetsClient(props: Props) {
         (collectingTargets.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-card p-8 text-center">
             <p className="mb-1 font-medium">Нет активных страниц</p>
-            <p className="mx-auto mb-4 max-w-md text-sm text-muted-foreground">
+            <p className="mx-auto max-w-md text-sm text-muted-foreground">
               Активные страницы собирают сессии и готовятся к AI-анализу.
               {completedTargets.length > 0 &&
                 " Завершённые — на соседней вкладке."}{" "}
-              Добавьте страницу, чтобы начать сбор.
+              {/* Кликабельный текст, а не вторая кнопка (кнопка «Добавить
+                  страницу» уже есть сверху) — открывает ту же форму. */}
+              <button
+                type="button"
+                onClick={openForm}
+                className="font-medium text-primary underline underline-offset-2 hover:no-underline"
+              >
+                Добавьте страницу
+              </button>
+              , чтобы начать сбор.
             </p>
-            <Button type="button" onClick={openForm}>
-              <Plus className="mr-1.5 h-4 w-4" />
-              Добавить страницу
-            </Button>
           </div>
         ) : (
           <div className="space-y-3">
@@ -654,6 +659,21 @@ function TargetCard({
                 setConfirmMode={setConfirmMode}
                 archiveAction={archiveAction}
               />
+            </div>
+          )}
+          {/* Архивные: если анализ был — рекомендации доступны (лежат в своей
+              таблице, ретеншн/архив их не трогают), даём ссылку. Без анализа
+              смотреть нечего — ничего не показываем («Проанализировано» — это
+              состояние, а не действие). */}
+          {archived && target.analyzed && (
+            <div className="flex flex-col items-end gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link
+                  href={`/dashboard/recommendations?targetId=${target.id}`}
+                >
+                  Смотреть рекомендации
+                </Link>
+              </Button>
             </div>
           )}
         </div>

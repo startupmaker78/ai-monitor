@@ -2,6 +2,10 @@ import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { loadOwnedSession } from "@/lib/sessions-data"
+import {
+  SESSION_RETENTION_DAYS,
+  sessionRetentionDaysLeft,
+} from "@/lib/session-retention"
 import { LocalDateTime } from "@/components/ui/local-date-time"
 import { SessionStatus } from "@/components/ui/session-status"
 import { SessionPlayer } from "./session-player"
@@ -49,6 +53,17 @@ export default async function SessionPlayerPage({ params }: PageProps) {
               </span>
             </>
           )}
+        </p>
+        {/* Ретеншн записи. Снимаем тревогу: удаляется ТОЛЬКО видеозапись,
+            рекомендации и метрики остаются. У демо-сессий обратный отсчёт не
+            показываем (даты искусственные) — только общее правило. */}
+        <p className="mt-2 text-xs text-muted-foreground">
+          {owned.site.isDemo
+            ? `Видеозаписи сессий хранятся ${SESSION_RETENTION_DAYS} дней. Рекомендации и метрики сохраняются навсегда.`
+            : `Видеозапись доступна ещё ~${sessionRetentionDaysLeft(
+                owned.startedAt,
+                owned.endedAt,
+              )} дн. (хранится ${SESSION_RETENTION_DAYS} дней). Рекомендации и метрики по этой сессии сохраняются навсегда.`}
         </p>
       </div>
 

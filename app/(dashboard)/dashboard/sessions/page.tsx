@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { getSessionsForUser } from "@/lib/sessions-data"
 import { getSelectedSiteId } from "@/lib/selected-site"
+import { SESSION_RETENTION_DAYS } from "@/lib/session-retention"
 import { Button } from "@/components/ui/button"
 import { SessionsTable } from "./sessions-table"
 import { TargetFilter } from "./target-filter"
@@ -62,13 +63,20 @@ export default async function SessionsPage({ searchParams }: PageProps) {
       {data.sessions.length === 0 ? (
         <EmptyNoSessions />
       ) : (
-        <SessionsTable
-          sessions={data.sessions}
-          selectedSiteId={data.selectedSiteId}
-          selectedTargetId={data.selectedTargetId}
-          selectedGoal={data.selectedGoal}
-          currentSort={sort}
-        />
+        <>
+          <SessionsTable
+            sessions={data.sessions}
+            selectedSiteId={data.selectedSiteId}
+            selectedTargetId={data.selectedTargetId}
+            selectedGoal={data.selectedGoal}
+            currentSort={sort}
+          />
+          <p className="text-xs text-muted-foreground">
+            Видеозаписи сессий хранятся {SESSION_RETENTION_DAYS} дней, затем
+            удаляются автоматически. Рекомендации и метрики по сессиям
+            сохраняются навсегда.
+          </p>
+        </>
       )}
     </div>
   )

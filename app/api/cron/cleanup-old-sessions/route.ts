@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { listKeys, deleteObjects } from "@/lib/storage"
+import { SESSION_RETENTION_DAYS } from "@/lib/session-retention"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const RETENTION_DAYS = 30
+// Единый источник правила — lib/session-retention (его же читает UI-подпись).
+const RETENTION_DAYS = SESSION_RETENTION_DAYS
 const MAX_SESSIONS_PER_RUN = 1000
 
 // Yandex Timer Trigger doesn't allow custom HTTP headers, so the auth

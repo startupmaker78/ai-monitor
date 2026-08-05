@@ -191,11 +191,24 @@ if (!siteToken) {
 
     buffer.start()
 
-    record({
-      ...recordConfig,
-      emit(event) {
-        buffer.add(event)
-      },
-    })
+    // FullSnapshot (rrweb) тяжёлый на main-thread: сериализация DOM + инлайн
+    // шрифтов. Откладываем старт записи на idle, чтобы не конкурировать с
+    // первичной отрисовкой (LCP) на тяжёлом DOM (Тильда). requestIdleCallback
+    // где есть; иначе setTimeout(0) — фолбэк для Safari (там rIC нет). timeout
+    // 2000мс: если main-thread долго занят, всё равно стартуем ≤2с — раннее
+    // событие не теряем надолго.
+    const startRecording = () =>
+      record({
+        ...recordConfig,
+        emit(event) {
+          buffer.add(event)
+        },
+      })
+
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(startRecording, { timeout: 2000 })
+    } else {
+      setTimeout(startRecording, 0)
+    }
   })()
 }

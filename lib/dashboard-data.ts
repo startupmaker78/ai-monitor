@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma"
 import { DEMO_TIER, calculateDemoUsage } from "@/lib/demo-tier-info"
+import { isTargetCompleted } from "@/lib/target-status"
 import { getMinSessionsBudget } from "@/lib/config"
 import {
   classifySession,
@@ -259,6 +260,22 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
     (t) => t.sessionsCollected >= minSessions && !analyzedTargetIds.has(t.id),
   )
 
+  // Активные (собирающие) страницы для блока на главной — ровно те же, что во
+  // вкладке «Активные» на «Страницах» (isTargetCompleted, общий предикат).
+  // Завершённые НЕ показываем: сбор закрыт, повтор блокирует already_completed —
+  // иначе врали бы «Готов к анализу» и клиент нажал бы в отказ.
+  const activePageTargets = targets.filter(
+    (t) =>
+      !isTargetCompleted({
+        analyzed: analyzedTargetIds.has(t.id),
+        sessionsCollected: t.sessionsCollected,
+        sessionsBudget: t.sessionsBudget,
+      }),
+  )
+  const completedPagesCount = targets.length - activePageTargets.length
+  // Можно ли добавить страницу (для заглушки — не советуем невозможное).
+  const canAddPage = targets.length < DEMO_TIER.targetsLimit
+
   return {
     site,
     // Продуктовые KPI (воронка: записали → отследили → проанализировали →
@@ -296,6 +313,11 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
     recommendations: topRecommendations.slice(0, 10),
     priorityCounts: counts,
     targets,
+    // Блок «Страницы» на главной — только АКТИВНЫЕ (собирающие/готовые/
+    // анализируются), синхронно со вкладкой «Активные». + контекст для заглушки.
+    activePageTargets,
+    completedPagesCount,
+    canAddPage,
     engagement,
     tier: {
       name: DEMO_TIER.name,

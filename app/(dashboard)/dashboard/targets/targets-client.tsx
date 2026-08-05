@@ -7,6 +7,7 @@ import Link from "next/link"
 import { CheckCircle2, Loader2, Lock, HelpCircle, Plus } from "lucide-react"
 import { guideHref } from "@/lib/guide-anchors"
 import { cn } from "@/lib/utils"
+import { isTargetCompleted as isCompleted } from "@/lib/target-status"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -80,14 +81,11 @@ function ArchiveSubmitButton() {
   )
 }
 
-// Завершённая = полный бюджет И есть анализ. Такая страница замерла навсегда:
-// бюджет не растёт, оба гейта (should-record + атомарный инкремент) закрывают
-// приём новых сессий. Проанализированная, но НЕ добитая до бюджета — ещё
-// собирает (Модель B), поэтому остаётся в «Активных».
-function isCompleted(t: TargetWithStats): boolean {
-  return t.analyzed && t.sessionsCollected >= t.sessionsBudget
-}
-
+// Завершённая = полный бюджет И есть анализ (isTargetCompleted, общий с блоком
+// на главной). Такая страница замерла навсегда: бюджет не растёт, оба гейта
+// (should-record + атомарный инкремент) закрывают приём новых сессий.
+// Проанализированная, но НЕ добитая до бюджета — ещё собирает (Модель B),
+// поэтому остаётся в «Активных».
 type TabKey = "active" | "completed" | "archived"
 
 export function TargetsClient(props: Props) {

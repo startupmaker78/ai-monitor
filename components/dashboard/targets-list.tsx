@@ -27,28 +27,85 @@ const STATUS_BADGES: Record<
 }
 
 interface TargetsListProps {
+  // ТОЛЬКО активные страницы (собирают / готовы к запуску / анализируются) —
+  // синхронно со вкладкой «Активные» на «Страницах». Завершённые сюда не
+  // попадают (сбор закрыт, повтор блокирует already_completed).
   targets: AnalysisTarget[]
   // Цели, готовые к анализу (collected>=минимум, ещё не проанализированы).
   // Модель B: запуск возможен не дожидаясь бюджета — подсвечиваем + CTA.
   readyTargetIds?: string[]
+  // Сколько страниц уже завершено (для заглушки, когда активных нет).
+  completedCount?: number
+  // Можно ли добавить страницу (лимит тарифа не исчерпан) — чтобы заглушка
+  // не советовала невозможное.
+  canAddPage?: boolean
 }
 
-export function TargetsList({ targets, readyTargetIds = [] }: TargetsListProps) {
+export function TargetsList({
+  targets,
+  readyTargetIds = [],
+  completedCount = 0,
+  canAddPage = true,
+}: TargetsListProps) {
   const readySet = new Set(readyTargetIds)
   if (targets.length === 0) {
+    // Различаем «всё проанализировано» (есть завершённые → два пути) и «страниц
+    // ещё нет» (новый клиент → добавить первую).
+    const allAnalyzed = completedCount > 0
     return (
       <Card>
-        <CardContent className="py-8 text-center">
-          <p className="text-muted-foreground">
-            У вас пока нет добавленных страниц. Добавьте первую — обычно это
-            главная или /pricing.
-          </p>
-          <Link
-            href="/dashboard/targets"
-            className="mt-4 inline-block text-primary hover:underline"
-          >
-            Перейти к управлению страницами →
-          </Link>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>Активные страницы</CardTitle>
+            <Link
+              href="/dashboard/targets"
+              className="shrink-0 text-sm text-primary hover:underline"
+            >
+              Управление страницами →
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent className="py-6 text-center">
+          {allAnalyzed ? (
+            <>
+              <p className="font-medium">Все страницы проанализированы</p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                Активных страниц сейчас нет — сбор по всем закончен.{" "}
+                {canAddPage
+                  ? "Посмотрите рекомендации или добавьте новую страницу для анализа."
+                  : "Лимит страниц тарифа исчерпан: посмотрите рекомендации или освободите слот, архивировав завершённую страницу."}
+              </p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
+                <Link
+                  href="/dashboard/recommendations"
+                  className="font-medium text-primary hover:underline"
+                >
+                  Смотреть рекомендации →
+                </Link>
+                {canAddPage && (
+                  <Link
+                    href="/dashboard/targets"
+                    className="font-medium text-primary hover:underline"
+                  >
+                    Добавить страницу →
+                  </Link>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-muted-foreground">
+                У вас пока нет добавленных страниц. Добавьте первую — обычно это
+                главная или /pricing.
+              </p>
+              <Link
+                href="/dashboard/targets"
+                className="mt-4 inline-block text-primary hover:underline"
+              >
+                Перейти к управлению страницами →
+              </Link>
+            </>
+          )}
         </CardContent>
       </Card>
     )
@@ -58,7 +115,7 @@ export function TargetsList({ targets, readyTargetIds = [] }: TargetsListProps) 
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
-          <CardTitle>Страницы для анализа</CardTitle>
+          <CardTitle>Активные страницы</CardTitle>
           <Link
             href="/dashboard/targets"
             className="shrink-0 text-sm text-primary hover:underline"
@@ -67,9 +124,8 @@ export function TargetsList({ targets, readyTargetIds = [] }: TargetsListProps) 
           </Link>
         </div>
         <CardDescription>
-          AI анализирует поведение посетителей на выбранных страницах. Ниже —
-          прогресс сбора сессий по каждой странице. Запуск анализа и управление
-          — в разделе «Страницы».
+          Собирают сессии и готовятся к AI-анализу. Ниже — прогресс сбора по
+          каждой. Завершённые страницы и запуск анализа — в разделе «Страницы».
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

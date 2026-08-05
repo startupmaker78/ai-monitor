@@ -135,7 +135,6 @@ export default async function DashboardPage({
         targets={data.activePageTargets}
         readyTargetIds={data.readyTargetIds}
         completedCount={data.completedPagesCount}
-        canAddPage={data.canAddPage}
       />
 
       <EngagementBlock engagement={data.engagement} />

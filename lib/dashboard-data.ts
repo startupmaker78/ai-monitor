@@ -273,8 +273,6 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
       }),
   )
   const completedPagesCount = targets.length - activePageTargets.length
-  // Можно ли добавить страницу (для заглушки — не советуем невозможное).
-  const canAddPage = targets.length < DEMO_TIER.targetsLimit
 
   return {
     site,
@@ -317,7 +315,6 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
     // анализируются), синхронно со вкладкой «Активные». + контекст для заглушки.
     activePageTargets,
     completedPagesCount,
-    canAddPage,
     engagement,
     tier: {
       name: DEMO_TIER.name,

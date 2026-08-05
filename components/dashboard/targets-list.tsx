@@ -36,16 +36,12 @@ interface TargetsListProps {
   readyTargetIds?: string[]
   // Сколько страниц уже завершено (для заглушки, когда активных нет).
   completedCount?: number
-  // Можно ли добавить страницу (лимит тарифа не исчерпан) — чтобы заглушка
-  // не советовала невозможное.
-  canAddPage?: boolean
 }
 
 export function TargetsList({
   targets,
   readyTargetIds = [],
   completedCount = 0,
-  canAddPage = true,
 }: TargetsListProps) {
   const readySet = new Set(readyTargetIds)
   if (targets.length === 0) {
@@ -70,26 +66,18 @@ export function TargetsList({
             <>
               <p className="font-medium">Все страницы проанализированы</p>
               <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                Активных страниц сейчас нет — сбор по всем закончен.{" "}
-                {canAddPage
-                  ? "Посмотрите рекомендации или добавьте новую страницу для анализа."
-                  : "Лимит страниц тарифа исчерпан: посмотрите рекомендации или освободите слот, архивировав завершённую страницу."}
+                Активных страниц сейчас нет — сбор по всем закончен.
               </p>
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
+              {/* Одна ссылка по центру — чтение рекомендаций, главное действие
+                  в этом состоянии. «Управление страницами» — в углу заголовка
+                  (оттуда добавляют/управляют). */}
+              <div className="mt-4">
                 <Link
                   href="/dashboard/recommendations"
                   className="font-medium text-primary hover:underline"
                 >
                   Смотреть рекомендации →
                 </Link>
-                {canAddPage && (
-                  <Link
-                    href="/dashboard/targets"
-                    className="font-medium text-primary hover:underline"
-                  >
-                    Добавить страницу →
-                  </Link>
-                )}
               </div>
             </>
           ) : (

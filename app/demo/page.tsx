@@ -133,7 +133,6 @@ export default async function DemoPage() {
           targets={data.activePageTargets}
           readyTargetIds={data.readyTargetIds}
           completedCount={data.completedPagesCount}
-          canAddPage={data.canAddPage}
         />
 
         <div>

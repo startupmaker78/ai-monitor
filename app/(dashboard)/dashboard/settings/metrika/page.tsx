@@ -6,6 +6,7 @@ import { getOwnerSitesByUserId } from "@/lib/site-data"
 import { getSelectedSiteId } from "@/lib/selected-site"
 import { guideHref } from "@/lib/guide-anchors"
 import { Button } from "@/components/ui/button"
+import { SyncButton } from "@/components/dashboard/sync-button"
 import { MetrikaForm } from "./metrika-form"
 
 export const metadata = {
@@ -68,6 +69,27 @@ export default async function MetrikaSettingsPage({ searchParams }: PageProps) {
         initialCounterId={selectedSite.metrikaCounterId ?? ""}
         initialTokenSet={Boolean(selectedSite.metrikaToken)}
       />
+
+      {/* Ручное обновление данных Метрики. Перенесено с главной (там было
+          шумом): по смыслу — рядом с настройкой Метрики. Данные снапшотов
+          (визиты/отказы/конверсия) идут в AI-анализ, поэтому кнопку не убираем,
+          только переносим — ночного крона мало, нужен ручной триггер (например,
+          сразу после подключения счётчика). Показываем только когда Метрика
+          подключена (иначе кнопка вела бы «Настроить» на эту же страницу). */}
+      {Boolean(selectedSite.metrikaCounterId && selectedSite.metrikaToken) && (
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-medium">Данные Метрики</p>
+              <p className="text-sm text-muted-foreground">
+                Обновляются автоматически раз в сутки. Можно обновить вручную —
+                например, сразу после подключения счётчика.
+              </p>
+            </div>
+            <SyncButton siteId={selectedSite.id} metrikaConfigured />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

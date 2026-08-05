@@ -13,7 +13,6 @@ import { TierBadge } from "@/components/dashboard/tier-badge"
 import { UsageWidget } from "@/components/dashboard/usage-widget"
 import { TargetsList } from "@/components/dashboard/targets-list"
 import { EngagementBlock } from "@/components/dashboard/engagement-block"
-import { SyncButton } from "@/components/dashboard/sync-button"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 
@@ -66,24 +65,22 @@ export default async function DashboardPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">
-            Привет, {session.user.name ?? "Пользователь"}!
-          </h2>
-          <p className="mt-1 text-muted-foreground">
-            Сводка по сайту {toUnicodeDomain(data.site.domain)}
-            {data.site.isDemo && (
-              <span className="ml-2 inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10">
-                Демо
-              </span>
-            )}
-          </p>
-          <div className="mt-3">
-            <TierBadge name={data.tier.name} price={data.tier.price} />
-          </div>
+      <div>
+        {/* Приветствие убрано (место без смысла); подзаголовок «Сводка по
+            сайту» стал заголовком. Цена убрана из бейджа — она на странице
+            тарифа, а не ежедневным напоминанием о списании. Бейдж кликабельный
+            → тарифы. Кнопка синка Метрики перенесена в Настройки → Метрика. */}
+        <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
+          Сводка по сайту {toUnicodeDomain(data.site.domain)}
+          {data.site.isDemo && (
+            <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10">
+              Демо
+            </span>
+          )}
+        </h2>
+        <div className="mt-3">
+          <TierBadge name={data.tier.name} href="/dashboard/settings/tariff" />
         </div>
-        <SyncButton siteId={data.site.id} metrikaConfigured={metrikaConfigured} />
       </div>
 
       <OnboardingBanner

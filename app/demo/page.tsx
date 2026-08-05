@@ -129,7 +129,12 @@ export default async function DemoPage() {
 
         <SessionsChart data={data.sessionsChart} />
 
-        <TargetsList targets={data.targets} readyTargetIds={data.readyTargetIds} />
+        <TargetsList
+          targets={data.activePageTargets}
+          readyTargetIds={data.readyTargetIds}
+          completedCount={data.completedPagesCount}
+          canAddPage={data.canAddPage}
+        />
 
         <div>
           <div className="mb-4 flex items-center justify-between">

@@ -10,6 +10,7 @@ import {
   Circle,
   ChevronDown,
   ChevronRight,
+  Gauge,
   Plus,
 } from "lucide-react"
 import type { ConnectionStatus } from "@/lib/connection-status"
@@ -477,6 +478,18 @@ function SiteCard({
                 Вставьте этот код в раздел «Шапка» или «Подвал» настроек
                 сайта. Для Tilda: Настройки сайта → Дополнительно → HTML код
                 для вставки внутрь HEAD.
+              </p>
+              {/* Только проверяемое (вес по проводу gzip + async + отложенный
+                  старт — из кода). БЕЗ «не влияет на скорость»: дельта тонула в
+                  шуме, Тильду не мерили — недоказанное не обещаем. */}
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Gauge className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Скрипт весит ~58&nbsp;КБ (сжатый) и подключается асинхронно
+                  (<code className="text-[11px]">async</code>) — не блокирует
+                  отрисовку страницы. Запись поведения включается уже после
+                  загрузки, вне критического пути отрисовки.
+                </span>
               </p>
             </div>
 

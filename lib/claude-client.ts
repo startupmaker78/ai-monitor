@@ -27,7 +27,24 @@ const AI_DISPATCHER = new Agent({
   keepAliveTimeout: 1,
   keepAliveMaxTimeout: 1,
   pipelining: 0,
+  connect: { timeout: 6000 }, // 6с на установку сокета — падаем быстро, ретраим
 })
+
+// Connect-retry (DECISIONS 2026-08-05): свежий сокет убрал бóльшую часть
+// connect-timeout'ов (keep-alive reuse), но остаётся ~5% — сам канал РФ→fra
+// теряет SYN. Ретраим ТОЛЬКО ошибки фазы установки соединения (запрос
+// гарантированно НЕ ушёл → двойной генерации/оплаты быть не может). 5xx/503
+// (приходят ПОСЛЕ отправки) НЕ ретраим — отдаём relay_unavailable, ручная
+// «Повторить» в UI. 3 попытки × 6с connect + бэкофф 0.5→1с ≤ ~20с, влезаем в
+// 300с API Gateway (сбор ≤60 + анализ ~150 + ретраи ~20).
+const RETRIABLE_CONNECT_CODES = new Set([
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+])
+const RETRY_BACKOFF_MS = [500, 1000] // после 1-й и 2-й неудачи
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export type ClaudeMessage = {
   role: "user" | "assistant"
@@ -151,28 +168,41 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
     headers["X-Proxy-Auth"] = proxyAuth
   }
 
-  // undici-fetch со СВОИМ dispatcher без keep-alive (свежий сокет на вызов).
-  let response: Awaited<ReturnType<typeof undiciFetch>>
-  try {
-    response = await undiciFetch(apiUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      dispatcher: AI_DISPATCHER,
-    })
-  } catch (err) {
-    const e = err as Error & { code?: string; cause?: unknown }
-    console.error("[claude-client] fetch failed", {
-      errorName: e?.name,
-      errorMessage: e?.message,
-      errorCode: e?.code,
-      cause: e?.cause,
-    })
-    return {
-      ok: false,
-      error: "network_error",
-      details: e?.message,
+  // undici-fetch со СВОИМ dispatcher без keep-alive (свежий сокет на вызов) +
+  // connect-retry на транзитный SYN-loss. Ретраим ТОЛЬКО фазу установки.
+  let response: Awaited<ReturnType<typeof undiciFetch>> | undefined
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      response = await undiciFetch(apiUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        dispatcher: AI_DISPATCHER,
+      })
+      break // получили ответ (даже HTTP-ошибку) — connect прошёл, дальше по статусу
+    } catch (err) {
+      const e = err as Error & { code?: string; cause?: { code?: string } }
+      const code = e?.cause?.code ?? e?.code
+      const retriable =
+        typeof code === "string" && RETRIABLE_CONNECT_CODES.has(code)
+      const last = attempt === 2
+      console.error("[claude-client] fetch failed", {
+        attempt: attempt + 1,
+        errorName: e?.name,
+        errorMessage: e?.message,
+        connectCode: code,
+        retriable,
+        willRetry: retriable && !last,
+      })
+      if (!retriable || last) {
+        return { ok: false, error: "network_error", details: e?.message }
+      }
+      await sleep(RETRY_BACKOFF_MS[attempt])
     }
+  }
+  if (!response) {
+    // недостижимо (цикл либо break, либо return), но успокаиваем типы
+    return { ok: false, error: "network_error", details: "no response" }
   }
 
   // ОТКАЗ САМОГО ПРОКСИ (не провайдера) — ДО разбора статуса. Fly-прокси

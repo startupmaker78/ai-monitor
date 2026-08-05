@@ -26,6 +26,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { buildTrackerSnippet } from "@/lib/site-utils"
+import { cn } from "@/lib/utils"
 
 type Site = {
   id: string
@@ -401,6 +402,52 @@ function ConnectionStatusWidget({ status }: { status: ConnectionStatus }) {
   )
 }
 
+// Платформы вставки кода. Тексты выверены — не переписывать. Инструкции
+// хранятся как обычные строки и рендерятся через {instruction}, поэтому
+// литералы <head>, </head>, header.php показываются как текст, а не как
+// JSX-теги. GTM намеренно отсутствует: через тег-менеджер трекер стартует
+// позже и теряет ранние клики — именно их мы анализируем.
+type PlatformKey = "tilda" | "wordpress" | "bitrix" | "webflow" | "wix" | "other"
+
+const PLATFORMS: { key: PlatformKey; label: string; instruction: string }[] = [
+  {
+    key: "tilda",
+    label: "Tilda",
+    instruction:
+      "Настройки сайта → Дополнительно → HTML-код для вставки внутрь HEAD. Вставьте код и опубликуйте сайт заново — без публикации изменения не применятся.",
+  },
+  {
+    key: "wordpress",
+    label: "WordPress",
+    instruction:
+      "Внешний вид → Редактор тем → header.php, перед закрывающим </head>. Если тема обновляется — надёжнее вставить через плагин для вставки кода в шапку, тогда правка переживёт обновление.",
+  },
+  {
+    key: "bitrix",
+    label: "Битрикс",
+    instruction:
+      "Настройки → Настройки продукта → Сайты, либо напрямую в шаблон сайта header.php перед </head>. После правки сбросьте кеш сайта.",
+  },
+  {
+    key: "webflow",
+    label: "Webflow",
+    instruction:
+      "Project Settings → Custom Code → Head Code. Вставьте код и нажмите Publish — на превью-домене код не работает.",
+  },
+  {
+    key: "wix",
+    label: "Wix",
+    instruction:
+      "Settings → Custom Code → Add Custom Code, разместите в Head, область применения — All pages.",
+  },
+  {
+    key: "other",
+    label: "Другой сайт",
+    instruction:
+      "Вставьте код в HTML-шапку сайта, внутрь тега <head>, на всех страницах, которые нужно анализировать. Если у вас есть общий шаблон или частичное включение шапки — вставляйте туда.",
+  },
+]
+
 function SiteCard({
   site,
   status,
@@ -414,17 +461,15 @@ function SiteCard({
   onCopy: () => void
   onDelete: () => void
 }) {
-  const allGreen = Boolean(
-    status &&
-      status.trackerActive &&
-      status.metrikaConfigured &&
-      status.syncHasData,
-  )
   // Статус ВСЕГДА виден. Сворачивается только КОД трекера: он нужен один раз
-  // при настройке, а места занимает много. Всё подключено → код свёрнут (по
-  // клику разворачивается). Не всё → код показан (трекер ещё не стоит).
+  // при настройке, а места занимает много. Дефолт завязан на ТРЕКЕР (а не на
+  // «всё зелёное»): шлёт сессии → код свёрнут (по клику разворачивается); не
+  // шлёт / сайт только добавлен → код показан. Метрику/синк тут не учитываем —
+  // код трекера про Метрику ничего не решает.
+  const trackerActive = Boolean(status?.trackerActive)
   const [codeOpen, setCodeOpen] = useState(false)
-  const showCode = !allGreen || codeOpen
+  const [platform, setPlatform] = useState<PlatformKey>("tilda")
+  const showCode = !trackerActive || codeOpen
   const snippet = buildTrackerSnippet(site.trackingToken)
 
   return (
@@ -448,7 +493,7 @@ function SiteCard({
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">Код для вставки на сайт</p>
-                {allGreen && (
+                {trackerActive && (
                   <button
                     type="button"
                     onClick={() => setCodeOpen(false)}
@@ -474,11 +519,32 @@ function SiteCard({
                   </>
                 )}
               </Button>
-              <p className="text-xs text-muted-foreground">
-                Вставьте этот код в раздел «Шапка» или «Подвал» настроек
-                сайта. Для Tilda: Настройки сайта → Дополнительно → HTML код
-                для вставки внутрь HEAD.
-              </p>
+              {/* Куда вставить код: платформа выбирается чипсами, под ней —
+                  короткая инструкция. flex-wrap: на узкой ширине чипсы
+                  переносятся на новую строку, карточку не ломают. */}
+              <div className="space-y-2 pt-1">
+                <p className="text-sm font-medium">Куда вставить код</p>
+                <div className="flex flex-wrap gap-2">
+                  {PLATFORMS.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => setPlatform(p.key)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-xs transition-colors",
+                        platform === p.key
+                          ? "border-primary bg-primary/10 font-medium text-foreground"
+                          : "border-transparent bg-muted text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {PLATFORMS.find((p) => p.key === platform)?.instruction}
+                </p>
+              </div>
               {/* Только проверяемое (вес по проводу gzip + async + отложенный
                   старт — из кода). БЕЗ «не влияет на скорость»: дельта тонула в
                   шуме, Тильду не мерили — недоказанное не обещаем. */}

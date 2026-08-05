@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { BarChart3, Globe, User } from "lucide-react"
+import { BarChart3, CreditCard, Globe, User } from "lucide-react"
 import {
   Card,
   CardDescription,
@@ -29,6 +29,12 @@ const SETTINGS_SECTIONS = [
     description: "ID счётчика и API-токен для каждого сайта",
     href: "/dashboard/settings/metrika",
     icon: BarChart3,
+  },
+  {
+    title: "Тарифы",
+    description: "Что входит в тариф и остаток лимитов",
+    href: "/dashboard/settings/tariff",
+    icon: CreditCard,
   },
 ]
 

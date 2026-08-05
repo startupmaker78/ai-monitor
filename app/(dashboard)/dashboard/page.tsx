@@ -117,8 +117,8 @@ export default async function DashboardPage({
         </Link>
       </div>
 
-      <FreshRecommendations items={data.freshCritical} />
-
+      {/* Порядок: KPI → тариф (остаток лимитов виден до упора) → свежие
+          критичные → график. FreshCritical условный — чаще Usage сразу #2. */}
       <UsageWidget
         usage={data.usage}
         tierName={data.tier.name}
@@ -128,6 +128,8 @@ export default async function DashboardPage({
           sessionsLimit: DEMO_TIER.sessionsLimit,
         }}
       />
+
+      <FreshRecommendations items={data.freshCritical} />
 
       <SessionsChart data={data.sessionsChart} />
 

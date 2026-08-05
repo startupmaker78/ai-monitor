@@ -167,10 +167,14 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
   monthStart.setUTCDate(1)
   monthStart.setUTCHours(0, 0, 0, 0)
 
+  // Считаем как гейт месячного лимита (analysis-runner): FAILED исключаем —
+  // провалившийся анализ слот НЕ жжёт, иначе виджет завышал бы «использовано»
+  // и клиент думал бы, что осталось меньше, чем на деле.
   const analysesThisMonth = await prisma.analysis.count({
     where: {
       siteId: site.id,
       createdAt: { gte: monthStart },
+      status: { not: "FAILED" },
     },
   })
 

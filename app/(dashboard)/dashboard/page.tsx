@@ -201,7 +201,7 @@ function OnboardingBanner({
 
   return (
     <Card className="border-amber-200 bg-amber-50/60">
-      <CardContent className="flex flex-wrap items-start justify-between gap-4 py-4">
+      <CardContent className="flex flex-col gap-4 py-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold">{title}</h3>
           <p className="mt-1 text-sm text-muted-foreground">{text}</p>

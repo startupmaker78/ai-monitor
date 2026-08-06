@@ -30,6 +30,7 @@ import { logout } from "@/app/(auth)/logout/actions"
 import { SidebarNav } from "./sidebar-nav"
 import { HeaderTitle } from "./header-title"
 import { SiteSwitcher } from "./site-switcher"
+import { SidebarResponsiveCollapse } from "./sidebar-responsive"
 import { getUserSitesAndSelected } from "@/lib/selected-site"
 
 export default async function DashboardLayout({
@@ -54,6 +55,7 @@ export default async function DashboardLayout({
 
   return (
     <SidebarProvider>
+      <SidebarResponsiveCollapse />
       <Sidebar collapsible="icon">
         <SidebarHeader>
           {/* В icon-режиме убираем внутренний px-2 и центрируем: иначе
@@ -118,7 +120,11 @@ export default async function DashboardLayout({
         </SidebarFooter>
       </Sidebar>
 
-      <SidebarInset>
+      {/* min-w-0: SidebarInset — flex-item; без него min-width:auto не даёт
+          контенту сжаться ниже его min-content в icon-rail состоянии (на 768
+          инсет распирало на ~34px → горизонтальный разъезд). С min-w-0 инсет
+          честно сжимается по flex, внутренние скроллы (таблица сессий) свои. */}
+      <SidebarInset className="min-w-0">
         {/* px-4 md:px-6 — совпадает с горизонтальным паддингом <main> (p-4
             md:p-6), иначе правый край хедера (селектор сайта) не совпадал с
             правым краем контента/таблицы. Общий хедер → фикс на всех страницах. */}

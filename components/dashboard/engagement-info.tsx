@@ -20,7 +20,13 @@ export function EngagementInfo() {
       >
         <HelpCircle className="h-4 w-4" />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 text-sm">
+      {/* max-h по доступной высоте, которую Radix считает от триггера до края
+          вьюпорта (с учётом коллизий) → поповер никогда не вылезает за экран
+          на 390, длинный текст скроллится внутри. */}
+      <PopoverContent
+        align="end"
+        className="max-h-[var(--radix-popover-content-available-height)] w-80 overflow-y-auto text-sm"
+      >
         <p className="font-medium">Вовлечённость страниц</p>
         <p className="mt-1 text-muted-foreground">
           Сколько посетителей сделали на странице хоть одно действие — клик,

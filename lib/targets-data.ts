@@ -107,19 +107,18 @@ export async function getTargetsPageData(
   const activeTargets = allTargets.filter((t) => t.archivedAt === null)
   const archivedTargets = allTargets.filter((t) => t.archivedAt !== null)
 
-  // sessionsAllocated (DECISIONS.md "2026-05-05 — Hotfix 5"):
-  // - Активные цели (archivedAt IS NULL): полный sessionsBudget
-  //   (резерв на сбор + анализ)
-  // - Архивированные цели: только sessionsCollected
-  //   (что реально использовано — остальное возвращено при архивации;
-  //   архивация ACTIVE/READY с collected>0 запрещена, поэтому архив
-  //   всегда отражает финальное использование).
-  const sessionsAllocated = allTargets.reduce((sum, t) => {
-    if (t.archivedAt === null) {
-      return sum + t.sessionsBudget
-    }
-    return sum + t.sessionsCollected
-  }, 0)
+  // sessionsAllocated (формула B): только АКТИВНЫЕ цели по полному
+  // sessionsBudget. Совпадает 1-в-1 с серверным гейтом create-цели
+  // (actions.ts) и с UsageWidget на Главной/Тарифах/demo (calculateDemoUsage).
+  // Архивные НЕ учитываем — гейт их не считает. Раньше тут была формула A
+  // (active budget + архивный collected) — расходилась с гейтом на Σ архивных
+  // collected (виджет «Страницы» показывал 150 при гейтовых 140). Политика
+  // «должен ли гейт учитывать архивный collected» — вопрос тарифной
+  // математики, решается отдельно, не здесь.
+  const sessionsAllocated = activeTargets.reduce(
+    (sum, t) => sum + t.sessionsBudget,
+    0,
+  )
 
   return {
     sites: sites.map((s) => ({

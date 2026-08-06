@@ -13,6 +13,14 @@ type StoredPacket = {
 
 type PacketRef = { url: string; packetIndex: number }
 
+// Инстанс rrweb-player (Svelte-компонент). $set/triggerResize — штатный
+// путь ресайза на лету; alpha-API, поэтому все методы optional.
+type PlayerInstance = {
+  $destroy?: () => void
+  $set?: (props: { width: number; height: number }) => void
+  triggerResize?: () => void
+}
+
 type FetchState =
   | { kind: "fetching_manifest" }
   | { kind: "fetching_packets" }
@@ -120,39 +128,89 @@ export function SessionPlayer({ sessionId }: Props) {
     const target = containerRef.current
     if (!target) return
 
-    let player: { $destroy?: () => void } | null = null
-    let aborted = false
+    // Нативные размеры записи (Meta type-4, фолбэк 1280×720). Плеер сам
+    // масштабирует запись под переданные width/height через transform:scale;
+    // кормим его шириной КОНТЕЙНЕРА (не записи), иначе на узком экране рама
+    // и контроллер уезжают за вьюпорт. Пропорции сохраняем; вверх запись НЕ
+    // растягиваем — width = min(containerWidth, recW).
+    const { width: recW, height: recH } = detectViewport(state.events)
+    const aspect = recH / recW
+    const events = state.events
 
-    void (async () => {
-      try {
-        const mod = await import("rrweb-player")
-        if (aborted) return
-        const RrwebPlayer = mod.default as new (opts: unknown) => {
-          $destroy?: () => void
+    function dimsFor(containerWidth: number) {
+      const width = Math.min(containerWidth, recW)
+      const height = Math.round(width * aspect)
+      return { width, height }
+    }
+
+    let player: PlayerInstance | null = null
+    let aborted = false
+    let initStarted = false
+    let debounce: ReturnType<typeof setTimeout> | null = null
+
+    function initPlayer(containerWidth: number) {
+      const { width, height } = dimsFor(containerWidth)
+      void (async () => {
+        try {
+          const mod = await import("rrweb-player")
+          if (aborted) return
+          const RrwebPlayer = mod.default as new (
+            opts: unknown,
+          ) => PlayerInstance
+          player = new RrwebPlayer({
+            target,
+            props: {
+              events,
+              width,
+              height,
+              autoPlay: false,
+              showController: true,
+              // Авто-скип пассивных периодов (idle-паузы, напр. вкладка
+              // висела без действий): rrweb пропускает gap'ы > порога
+              // вместо проигрывания «застывшего» экрана. Inactive-индикатор
+              // в прогресс-баре остаётся (inactiveColor по дефолту).
+              skipInactive: true,
+            },
+          })
+        } catch (err) {
+          console.error("[session-player] init failed:", err)
         }
-        const { width, height } = detectViewport(state.events)
-        player = new RrwebPlayer({
-          target,
-          props: {
-            events: state.events,
-            width,
-            height,
-            autoPlay: false,
-            showController: true,
-            // Авто-скип пассивных периодов (idle-паузы, напр. вкладка
-            // висела без действий): rrweb пропускает gap'ы > порога
-            // вместо проигрывания «застывшего» экрана. Inactive-индикатор
-            // в прогресс-баре остаётся (inactiveColor по дефолту).
-            skipInactive: true,
-          },
-        })
-      } catch (err) {
-        console.error("[session-player] init failed:", err)
+      })()
+    }
+
+    // ResizeObserver ведёт и первичную инициализацию, и ресайз на лету.
+    // clientWidth в init может быть 0 (контейнер ещё не разложен) — тогда
+    // НЕ кормим плеер нулём, ждём первого срабатывания с cw>0 (первый кадр
+    // не уедет). Ресайз — с дебаунсом.
+    const ro = new ResizeObserver((entries) => {
+      const cw = Math.round(entries[0]?.contentRect.width ?? 0)
+      if (cw <= 0) return
+      if (!initStarted) {
+        initStarted = true
+        initPlayer(cw)
+        return
       }
-    })()
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => {
+        if (!player) return
+        const { width, height } = dimsFor(cw)
+        player.$set?.({ width, height })
+        player.triggerResize?.()
+      }, 150)
+    })
+    ro.observe(target)
+
+    // Если ширина уже известна — инициализируем сразу, без ожидания кадра.
+    const initialWidth = target.clientWidth
+    if (initialWidth > 0 && !initStarted) {
+      initStarted = true
+      initPlayer(initialWidth)
+    }
 
     return () => {
       aborted = true
+      if (debounce) clearTimeout(debounce)
+      ro.disconnect()
       try {
         player?.$destroy?.()
       } catch (e) {

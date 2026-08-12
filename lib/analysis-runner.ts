@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma"
 import { callClaude } from "@/lib/claude-client"
 import {
+  buildAggregates,
   buildAnalysisPrompt,
   parseRecommendations,
   type AnalysisInput,
@@ -310,6 +311,14 @@ export async function runAnalysis(
     )
   }
 
+  // Агрегаты считаем ВНЕ try выше: они зависят только от sessionSummaries и
+  // счётчика пропущенных, никаких внешних вызовов. Если обогащение целью/
+  // конверсией упало, блок агрегатов всё равно должен уехать в промпт.
+  const aggregates = buildAggregates(
+    sessionSummaries,
+    collected.skipped.noInteractions,
+  )
+
   const input: AnalysisInput = {
     target: { url: target.url, name: target.name },
     site: { domain: target.site.domain, isDemo: target.site.isDemo },
@@ -318,6 +327,7 @@ export async function runAnalysis(
     sessionSummaries,
     goal: goalInput,
     sample: sampleInput,
+    aggregates,
   }
 
   // 10. Промпт.

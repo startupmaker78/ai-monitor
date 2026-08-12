@@ -67,11 +67,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Цель ищем в scope владельца и НЕ архивную: если не найдена (чужая /
   // архивная / несуществующая) — не отбиваем тут, пусть runAnalysis отдаст
   // свой target_not_found (не плодим утечку существования и дубль логики).
+  // Site.ownerId — это id OwnerProfile, а session.user.id — id User: разные
+  // сущности, напрямую сравнивать нельзя. До 13.08.2026 здесь стояло
+  // `site: { ownerId: session.user.id }` — условие не выполнялось НИКОГДА,
+  // gateTarget всегда был null, и гейт не срабатывал ни разу с момента
+  // написания. Переход User → OwnerProfile делаем как в recommendations-data
+  // и sessions-data: сначала профиль по userId, потом сравнение с op.id.
+  const op = await prisma.ownerProfile.findUnique({
+    where: { userId: session.user.id },
+    select: { id: true },
+  })
   const gateTarget = await prisma.analysisTarget.findFirst({
     where: {
       id: parsed.data.targetId,
       archivedAt: null,
-      site: { ownerId: session.user.id },
+      site: { ownerId: op?.id ?? "__no_owner_profile__" },
     },
     select: {
       sessionsCollected: true,

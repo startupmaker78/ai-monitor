@@ -57,7 +57,11 @@ export async function runAnalysis(
     where: { id: targetId },
     include: {
       site: {
-        select: { id: true, ownerId: true, domain: true, isDemo: true },
+        // ownerId тут НЕ нужен: владение проверяется ниже через
+        // validateSiteOwnership (User → OwnerProfile → sites). Раньше поле
+        // выбиралось вхолостую и провоцировало сравнивать его с userId —
+        // ровно та ошибка, что жила в гейте already_completed до 13.08.2026.
+        select: { id: true, domain: true, isDemo: true },
       },
     },
   })

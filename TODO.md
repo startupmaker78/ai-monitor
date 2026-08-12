@@ -1426,3 +1426,31 @@ truncation-safe матчинг) · `getMinPageVisitsForConversion` · smoke-ск
   успевать между тиками. Если понадобится менять расписание на удаляющем данные
   кроне — сначала удалять триггер, потом создавать с новым выражением, а не
   наоборот.
+
+- **[✅ ЗАКРЫТО 13.08.2026] Гейт `already_completed` не работал с момента написания.**
+  В `app/api/analysis/run/route.ts` цель искалась по
+  `site: { ownerId: session.user.id }` — но `Site.ownerId` это id **OwnerProfile**,
+  а `session.user.id` — id **User**. Разные сущности: на academy
+  `Site.ownerId = cmoq03o3200012v3cfnqym725`, `OwnerProfile.userId =
+  cmoq03o2n00002v3cnagq0cnt`. Условие не выполнялось НИКОГДА, `gateTarget`
+  всегда был `null`, гейт не срабатывал ни разу.
+  **Обнаружено 13.08** после того, как прямой POST запустил анализ завершённой
+  страницы «Главная» (полный бюджет 20/20 + готовый DONE-анализ) — он отработал
+  и списал слот, ровно то, что гейт был написан предотвращать.
+  От клиента дыра была прикрыта только тем, что UI не рисует кнопку запуска для
+  завершённой страницы (`isTargetCompleted` в клиенте); прямой POST её обходил.
+  **Правка:** переход User → OwnerProfile как в `recommendations-data.ts` и
+  `sessions-data.ts` — сначала профиль по `userId`, затем сравнение с `op.id`.
+  Заодно убран холостой `select: { ownerId: true }` в `analysis-runner.ts:60`:
+  поле нигде не использовалось (владение там проверяет `validateSiteOwnership`)
+  и провоцировало ровно эту же путаницу.
+  **Проверено фактом:** POST на «Главную» → HTTP 409 `already_completed`,
+  число строк `Analysis` не изменилось (12), не-FAILED за август осталось 1 —
+  слот не сгорел (гейт стоит в роуте до входа в `runAnalysis`, а строка
+  `Analysis` создаётся только внутри него).
+  **Аудит шаблона:** прошёл грепом по всем 15 употреблениям `ownerId` и по
+  `session.user.id` в prisma-запросах — **мёртвое место было ровно одно**.
+  Остальные семь мест (`sites/route.ts`, `sites/[id]/route.ts`,
+  `login/actions.ts`, `settings/sites/page.tsx`, `recommendations-data.ts` ×2,
+  `sessions-data.ts`) резолвят OwnerProfile корректно. Записано как проверенный
+  факт, чтобы не перепроверять.

@@ -129,11 +129,26 @@ jobs:
           attempt_limit: 3
           attempt_delay: 15000
           # tags через запятую (не многострочный |) — with передаётся строкой.
+          #
+          # provenance/sbom отключены 12.08.2026 ВРЕМЕННО. Причина: YC Container
+          # Registry перестал принимать OCI-индекс, содержащий attestation-манифест
+          # («unknown: Cannot read manifest data ... consistent with the requirements
+          # from .../manifest-v2-2/»). Слои заливались успешно, отказ приходил на
+          # пуше манифест-листа; 9 попыток в 3 прогонах. УТРОМ ТОГО ЖЕ ДНЯ тот же
+          # конфиг с тем же attestation прошёл (тег 8baa2111…), между сборками CI
+          # не менялся — правились только markdown-файлы. Отключение убирает
+          # attestation из индекса, и на выходе получается обычный манифест v2.2,
+          # которого и требует текст ошибки. sbom гасим заодно: по логам он и так
+          # был выключен (один attestation на сборку), но явный false исключает
+          # зависимость от дефолтов версии действия.
+          # ВЕРНУТЬ, когда поддержка YC ответит или починит приём индексов.
           with: |
             context: .
             file: ./Dockerfile
             push: true
             platforms: linux/amd64
+            provenance: false
+            sbom: false
             tags: cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:${{ github.sha }},cr.yandex/${{ env.YC_REGISTRY_ID }}/${{ env.IMAGE_REPO }}:latest
             cache-from: type=gha
             cache-to: type=gha,mode=max

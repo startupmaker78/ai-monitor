@@ -10,7 +10,6 @@ import { getSelectedSiteId } from "@/lib/selected-site"
 import { Card, CardContent } from "@/components/ui/card"
 import { TargetSelector } from "./target-selector"
 import { RecommendationsClient } from "./recommendations-client"
-import { ConversionBlock } from "./conversion-block"
 
 export const metadata = { title: "Рекомендации — Вебмонитор" }
 
@@ -93,13 +92,17 @@ export default async function RecommendationsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {/* «Сколько» — Метрика, отдельным блоком над анализом («почему»).
-          Два слоя не смешиваем (Этап 0). */}
-      <ConversionBlock conversion={conversion} />
-
       {/* key={target.id}: смена цели = ремоунт → selectedAnalysisIndex
-          сбрасывается в 0 (последний анализ новой цели). */}
-      <RecommendationsClient key={data.target.id} analyses={data.analyses} />
+          сбрасывается в 0 (последний анализ новой цели).
+          conversion уезжает внутрь: блок «сколько» рендерится там же, потому
+          что его видимость зависит от ВЫБРАННОГО анализа (клиентский стейт) —
+          анализам старше привязки цели он не принадлежит. Фетч Метрики
+          остаётся здесь, на сервере: токен границу не пересекает. */}
+      <RecommendationsClient
+        key={data.target.id}
+        analyses={data.analyses}
+        conversion={conversion}
+      />
     </div>
   )
 }

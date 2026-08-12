@@ -12,6 +12,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { AnalysisWithRecs } from "@/lib/recommendations-data"
+import type { TargetConversion } from "@/lib/goal-conversion-data"
+import { ConversionBlock, ConversionPredatesGoal } from "./conversion-block"
 
 const PRIORITY_META: Record<
   string,
@@ -38,9 +40,17 @@ const EFFORT_LABELS: Record<string, string> = {
 
 type Props = {
   analyses: AnalysisWithRecs[]
+  conversion: TargetConversion
 }
 
-export function RecommendationsClient({ analyses }: Props) {
+// Момент привязки текущего целевого действия — есть только у состояний, где
+// цель вообще задана. not_set / not_configured / target_not_found цели не
+// имеют, гейтить там нечего.
+function goalAttachedAt(c: TargetConversion): Date | null {
+  return c.state === "ok" || c.state === "error" ? c.goalAttachedAt : null
+}
+
+export function RecommendationsClient({ analyses, conversion }: Props) {
   // Дефолт 0 = последний анализ (analyses отсортирован desc). Смена цели
   // = ремоунт (page.tsx даёт key={target.id}) → индекс сам сбрасывается
   // в 0, рекомендации чужой цели не «залипнут».
@@ -49,14 +59,19 @@ export function RecommendationsClient({ analyses }: Props) {
   // Edge: цель без DONE-анализов. В норме не случается (target попадает в
   // список только с DONE+recs), но defensive — не падаем.
   if (analyses.length === 0) {
+    // Блок конверсии тут прежний, без гейта: анализа, с датой которого можно
+    // сравнивать, попросту нет.
     return (
-      <Card>
-        <CardContent className="py-12 text-center">
-          <p className="text-muted-foreground">
-            По этой странице пока нет рекомендаций.
-          </p>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <ConversionBlock conversion={conversion} />
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-muted-foreground">
+              По этой странице пока нет рекомендаций.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 
@@ -65,72 +80,96 @@ export function RecommendationsClient({ analyses }: Props) {
   const latest = analyses[0]
   const isLatest = safeIndex === 0
 
+  // Сравниваем со СТАРТОМ анализа, не с завершением. Цель подтягивается по
+  // ходу прогона (enrichment в analysis-runner уже после create), поэтому
+  // истина лежит между createdAt и completedAt. createdAt ошибается только в
+  // безопасную сторону — покажет честную строку анализу, который цель всё же
+  // успел подхватить; completedAt ошибся бы в обратную, оставив неверную
+  // подпись. Точный признак (блок «ЦЕЛЕВОЕ ДЕЙСТВИЕ» в Analysis.prompt) не
+  // берём: он станет не нужен, когда Analysis начнёт хранить свою цель.
+  const attachedAt = goalAttachedAt(conversion)
+  const analysisPredatesGoal =
+    attachedAt !== null && new Date(selected.createdAt) < new Date(attachedAt)
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          Анализ от{" "}
-          <span className="font-medium text-foreground">
-            <LocalDateTime value={selected.createdAt} />
-          </span>
-          {" · "}проанализировано{" "}
-          <TooltipProvider delayDuration={0}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  tabIndex={0}
-                  className="cursor-help underline decoration-dotted underline-offset-2 outline-none"
-                >
-                  {selected.sessionsAnalyzed} сессий с действиями
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs text-xs font-normal leading-relaxed">
-                Анализируются только сессии с действиями посетителя (клики,
-                скролл, формы). Пустые — bounce и пассивные просмотры —
-                пропускаются, поэтому число меньше, чем «собрано» у страницы.
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {" · "}
-          {selected.recommendationsCount} рек
-        </p>
-        {analyses.length > 1 && (
-          <AnalysisSelector
-            analyses={analyses}
-            selectedIndex={safeIndex}
-            onSelect={setSelectedIndex}
-          />
+    // space-y-6 снаружи / space-y-4 внутри — ровно те отступы, что были, когда
+    // блок конверсии стоял в page.tsx соседом сверху.
+    <div className="space-y-6">
+      {/* «Сколько» — Метрика, над анализом («почему»). Два слоя не смешиваем
+          (Этап 0). Живёт здесь, а не в page.tsx, потому что видимость зависит
+          от ВЫБРАННОГО анализа — а выбор это клиентский стейт. */}
+      {analysisPredatesGoal ? (
+        <ConversionPredatesGoal />
+      ) : (
+        <ConversionBlock conversion={conversion} />
+      )}
+
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            Анализ от{" "}
+            <span className="font-medium text-foreground">
+              <LocalDateTime value={selected.createdAt} />
+            </span>
+            {" · "}проанализировано{" "}
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    tabIndex={0}
+                    className="cursor-help underline decoration-dotted underline-offset-2 outline-none"
+                  >
+                    {selected.sessionsAnalyzed} сессий с действиями
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs font-normal leading-relaxed">
+                  Анализируются только сессии с действиями посетителя (клики,
+                  скролл, формы). Пустые — bounce и пассивные просмотры —
+                  пропускаются, поэтому число меньше, чем «собрано» у страницы.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            {" · "}
+            {selected.recommendationsCount} рек
+          </p>
+          {analyses.length > 1 && (
+            <AnalysisSelector
+              analyses={analyses}
+              selectedIndex={safeIndex}
+              onSelect={setSelectedIndex}
+            />
+          )}
+        </div>
+
+        {!isLatest && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <span>Это предыдущий анализ.</span>
+            <button
+              type="button"
+              onClick={() => setSelectedIndex(0)}
+              className="font-medium underline underline-offset-2 hover:no-underline"
+            >
+              Показать последний (<LocalDateTime value={latest.createdAt} />)
+            </button>
+          </div>
+        )}
+
+        {selected.recommendations.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <p className="text-muted-foreground">
+                В этом анализе нет рекомендаций.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-4">
+            {selected.recommendations.map((rec) => (
+              <RecommendationDetailCard key={rec.id} rec={rec} />
+            ))}
+          </div>
         )}
       </div>
-
-      {!isLatest && (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <span>Это предыдущий анализ.</span>
-          <button
-            type="button"
-            onClick={() => setSelectedIndex(0)}
-            className="font-medium underline underline-offset-2 hover:no-underline"
-          >
-            Показать последний (<LocalDateTime value={latest.createdAt} />)
-          </button>
-        </div>
-      )}
-
-      {selected.recommendations.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">
-              В этом анализе нет рекомендаций.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {selected.recommendations.map((rec) => (
-            <RecommendationDetailCard key={rec.id} rec={rec} />
-          ))}
-        </div>
-      )}
     </div>
   )
 }

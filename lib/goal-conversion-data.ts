@@ -11,11 +11,17 @@ import {
 // sessionWindowStart) — сама lib в БД не лезет (решено в 2B). Токен читается
 // здесь, наружу не уходит.
 
+// goalAttachedAt — момент привязки ТЕКУЩЕГО целевого действия. Нужен
+// потребителю, чтобы не подписывать этой конверсией анализы, прогнанные
+// ДО привязки: первая привязка (null → цель) разрешена и на странице с
+// готовыми анализами, и без этой даты блок ретроактивно переподписывал бы
+// старые выводы чужой целью. Берётся из той же строки Target, без доп. запроса.
 export type TargetConversion =
   | {
       state: "ok"
       goalName: string | null
       goalType: string | null
+      goalAttachedAt: Date | null
       conversionRate: number
       sampleVisits: number
       period: { from: string; to: string; widened: boolean }
@@ -25,6 +31,7 @@ export type TargetConversion =
       state: "error"
       reason: ConversionErrorReason
       goalName: string | null
+      goalAttachedAt: Date | null
     }
   // siteId — чтобы блок конверсии вёл на КОНКРЕТНУЮ цель (?site=…#target-…),
   // а не на общий список.
@@ -44,6 +51,7 @@ export async function getGoalConversionForTarget(
       metrikaGoalId: true,
       metrikaGoalName: true,
       metrikaGoalType: true,
+      goalAttachedAt: true,
     },
   })
   if (!target) return { state: "target_not_found" }
@@ -101,6 +109,7 @@ export async function getGoalConversionForTarget(
           state: "error",
           reason: "goal_archived",
           goalName: target.metrikaGoalName,
+          goalAttachedAt: target.goalAttachedAt,
         }
       }
     }
@@ -108,11 +117,17 @@ export async function getGoalConversionForTarget(
       state: "ok",
       goalName: target.metrikaGoalName,
       goalType: target.metrikaGoalType,
+      goalAttachedAt: target.goalAttachedAt,
       conversionRate: conv.conversionRate,
       sampleVisits: conv.sampleVisits,
       period: conv.period,
       lowConfidence: conv.lowConfidence,
     }
   }
-  return { state: "error", reason: conv.reason, goalName: target.metrikaGoalName }
+  return {
+    state: "error",
+    reason: conv.reason,
+    goalName: target.metrikaGoalName,
+    goalAttachedAt: target.goalAttachedAt,
+  }
 }

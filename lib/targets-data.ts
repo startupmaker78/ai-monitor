@@ -8,6 +8,21 @@ export type TargetWithStats = {
   name: string | null
   status: string
   sessionsCollected: number
+  // Сколько записей РЕАЛЬНО сохранилось. sessionsCollected считает
+  // ИЗРАСХОДОВАННЫЙ БЮДЖЕТ и никогда не уменьшается (иначе воскресает эксплойт
+  // «архив → добор», hotfix 2026-05-05), а записи живут 30 дней: lifecycle
+  // бакета сносит объекты, крон cleanup-old-sessions — строки. Через месяц
+  // после сбора числа расходятся, и клиент об этом узнавал только по факту
+  // куцего анализа. Считаем дёшево — count строк Session по цели (индекс
+  // @@index([analysisTargetId])), БЕЗ проверки пакетов в S3: точная проверка
+  // стоит по listKeys на сессию, то есть сотни сетевых вызовов на рендер
+  // списка. Погрешность ограничена суткам между сносом объектов и ближайшим
+  // прогоном крона в 03:30 UTC.
+  //
+  // ВАЖНО: это НЕ «доступно к анализу» — из сохранившихся записей часть ещё
+  // отсеется пре-процессором (no_full_snapshot, corrupted, без действий).
+  // Поэтому в UI формулировка «записей сохранено», без обещаний.
+  sessionsAvailable: number
   sessionsBudget: number
   archivedAt: Date | null
   createdAt: Date
@@ -88,12 +103,23 @@ export async function getTargetsPageData(
     },
   })
 
+  // Один groupBy на все цели сайта вместо запроса на цель.
+  const availableRaw = await prisma.session.groupBy({
+    by: ["analysisTargetId"],
+    where: { analysisTargetId: { in: allTargetsRaw.map((t) => t.id) } },
+    _count: true,
+  })
+  const availableByTarget = new Map(
+    availableRaw.map((r) => [r.analysisTargetId, r._count]),
+  )
+
   const allTargets: TargetWithStats[] = allTargetsRaw.map((t) => ({
     id: t.id,
     url: t.url,
     name: t.name,
     status: t.status,
     sessionsCollected: t.sessionsCollected,
+    sessionsAvailable: availableByTarget.get(t.id) ?? 0,
     sessionsBudget: t.sessionsBudget,
     archivedAt: t.archivedAt,
     createdAt: t.createdAt,

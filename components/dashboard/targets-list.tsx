@@ -2,6 +2,7 @@ import Link from "next/link"
 import type { AnalysisTarget } from "@prisma/client"
 import type { LucideIcon } from "lucide-react"
 import { Archive, CheckCircle2, Loader2, PlayCircle } from "lucide-react"
+import { SESSION_RETENTION_DAYS } from "@/lib/session-retention"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -30,7 +31,9 @@ interface TargetsListProps {
   // ТОЛЬКО активные страницы (собирают / готовы к запуску / анализируются) —
   // синхронно со вкладкой «Активные» на «Страницах». Завершённые сюда не
   // попадают (сбор закрыт, повтор блокирует already_completed).
-  targets: AnalysisTarget[]
+  // sessionsAvailable — сколько записей реально сохранилось (записи живут
+  // 30 дней, sessionsCollected считает израсходованный бюджет и не убывает).
+  targets: Array<AnalysisTarget & { sessionsAvailable: number }>
   // Цели, готовые к анализу (collected>=минимум, ещё не проанализированы).
   // Модель B: запуск возможен не дожидаясь бюджета — подсвечиваем + CTA.
   readyTargetIds?: string[]
@@ -164,6 +167,15 @@ export function TargetsList({
                   {target.sessionsBudget.toLocaleString("ru-RU")}
                 </span>
               </div>
+
+              {/* Компактный вариант той же правды, что на карточке страницы:
+                  показываем только при расхождении, порог не процентный. */}
+              {target.sessionsAvailable < target.sessionsCollected && (
+                <p className="text-xs text-muted-foreground">
+                  Записей сохранено: {target.sessionsAvailable} — остальные
+                  истекли ({SESSION_RETENTION_DAYS} дней хранения)
+                </p>
+              )}
 
               {isReady && (
                 <p className="text-xs text-muted-foreground">

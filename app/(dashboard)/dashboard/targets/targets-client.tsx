@@ -8,6 +8,7 @@ import { CheckCircle2, Loader2, Lock, HelpCircle, Plus } from "lucide-react"
 import { guideHref } from "@/lib/guide-anchors"
 import { cn } from "@/lib/utils"
 import { isTargetCompleted as isCompleted } from "@/lib/target-status"
+import { SESSION_RETENTION_DAYS } from "@/lib/session-retention"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -404,7 +405,7 @@ function pluralSession(n: number): string {
 // проанализированной прогресс не показываем. Сигналы: analyzed (факт анализа,
 // не status — COMPLETED в бою не выставляется), collected/budget, минимум для
 // запуска (Модель B: collected>=5 → «можно запускать» не дожидаясь бюджета).
-function TargetStatus({
+function TargetStatusLine({
   target,
   archived,
   minSessions,
@@ -486,6 +487,38 @@ function TargetStatus({
   )
 }
 
+// Расхождение «собрано» и «сохранено». Порог намеренно НЕ процентный: разрыв
+// появляется через 30 дней после сбора и дальше только растёт, промежуточных
+// состояний нет — поэтому показываем при ЛЮБОМ расхождении. Пока числа
+// совпадают, карточка выглядит ровно как раньше, ничего лишнего.
+function ExpiredRecordsNote({ target }: { target: TargetWithStats }) {
+  if (target.sessionsAvailable >= target.sessionsCollected) return null
+  return (
+    <div className="mt-1">
+      <p className="text-xs text-muted-foreground">
+        Собрано {target.sessionsCollected} из {target.sessionsBudget} · записей
+        сохранено: {target.sessionsAvailable}
+      </p>
+      <p className="text-[11px] text-muted-foreground/80">
+        Записи хранятся {SESSION_RETENTION_DAYS} дней, остальные истекли
+      </p>
+    </div>
+  )
+}
+
+function TargetStatus(props: {
+  target: TargetWithStats
+  archived: boolean
+  minSessions: number
+}) {
+  return (
+    <>
+      <TargetStatusLine {...props} />
+      <ExpiredRecordsNote target={props.target} />
+    </>
+  )
+}
+
 // Клиентский таймаут запроса анализа. Норма ~55с; берём 150с — покрывает
 // разброс, но ниже Gateway 300с (быстрее его 504). При аборте НЕ говорим
 // «провал»: сервер мог довести анализ (свои гарды), результат появится в
@@ -537,6 +570,10 @@ function TargetCard({
   )
   const [confirmMode, setConfirmMode] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  // Подтверждение запуска на неполных данных. Запуск НЕ блокируем — записи
+  // валидные, их просто меньше; но слот из месячного лимита списывается
+  // целиком, поэтому клиент должен узнать ДО, а не по куцему отчёту после.
+  const [expiredConfirm, setExpiredConfirm] = useState(false)
   const [notice, setNotice] = useState<AnalyzeNotice | null>(null)
   const [goalPending, startGoalTransition] = useTransition()
   const [goalError, setGoalError] = useState<string | null>(null)
@@ -554,7 +591,17 @@ function TargetCard({
     })
   }
 
+  // Клик по «Запустить анализ»: при расхождении сначала подтверждение.
+  function requestAnalyze() {
+    if (target.sessionsAvailable < target.sessionsCollected) {
+      setExpiredConfirm(true)
+      return
+    }
+    void handleAnalyze()
+  }
+
   async function handleAnalyze() {
+    setExpiredConfirm(false)
     setAnalyzing(true)
     setNotice(null)
     // Таймаут: не вечный спиннер. abort() → catch AbortError → «идёт дольше».
@@ -646,7 +693,7 @@ function TargetCard({
                 <AnalyzeButton
                   target={target}
                   analyzing={analyzing}
-                  onAnalyze={handleAnalyze}
+                  onAnalyze={requestAnalyze}
                   minSessionsBudget={minSessionsBudget}
                 />
               )}
@@ -675,6 +722,32 @@ function TargetCard({
             </div>
           )}
         </div>
+        {/* Подтверждение запуска на неполных данных. Не блокирует: кнопка
+            «Запустить» тут же рядом. Текст называет обе цифры и прямо говорит
+            про списание слота — это главное, ради чего спрашиваем. */}
+        {expiredConfirm && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm text-amber-900">
+              Сохранилось {target.sessionsAvailable} записей из{" "}
+              {target.sessionsCollected} собранных — остальные истекли по сроку
+              хранения ({SESSION_RETENTION_DAYS} дней). Анализ будет построен на
+              доступных записях и спишет один анализ из месячного лимита.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Button type="button" size="sm" onClick={() => void handleAnalyze()}>
+                Запустить
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setExpiredConfirm(false)}
+              >
+                Отмена
+              </Button>
+            </div>
+          </div>
+        )}
         {/* Целевое действие (Path M). Архивные — read-only. Активные:
             GoalSelect для смены, если не зафиксировано (goalLocked). */}
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">

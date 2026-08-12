@@ -268,14 +268,32 @@ export async function getDashboardData(userId: string, selectedSiteId?: string) 
   // вкладке «Активные» на «Страницах» (isTargetCompleted, общий предикат).
   // Завершённые НЕ показываем: сбор закрыт, повтор блокирует already_completed —
   // иначе врали бы «Готов к анализу» и клиент нажал бы в отказ.
-  const activePageTargets = targets.filter(
-    (t) =>
-      !isTargetCompleted({
-        analyzed: analyzedTargetIds.has(t.id),
-        sessionsCollected: t.sessionsCollected,
-        sessionsBudget: t.sessionsBudget,
-      }),
+  // Сколько записей реально сохранилось по каждой цели. sessionsCollected —
+  // израсходованный бюджет, он не уменьшается; записи живут 30 дней. Один
+  // groupBy по индексу @@index([analysisTargetId]) — без обращений к S3
+  // (см. подробности в lib/targets-data.ts).
+  const availableRaw = await prisma.session.groupBy({
+    by: ["analysisTargetId"],
+    where: { analysisTargetId: { in: targets.map((t) => t.id) } },
+    _count: true,
+  })
+  const availableByTarget = new Map(
+    availableRaw.map((r) => [r.analysisTargetId, r._count]),
   )
+
+  const activePageTargets = targets
+    .filter(
+      (t) =>
+        !isTargetCompleted({
+          analyzed: analyzedTargetIds.has(t.id),
+          sessionsCollected: t.sessionsCollected,
+          sessionsBudget: t.sessionsBudget,
+        }),
+    )
+    .map((t) => ({
+      ...t,
+      sessionsAvailable: availableByTarget.get(t.id) ?? 0,
+    }))
   const completedPagesCount = targets.length - activePageTargets.length
 
   return {

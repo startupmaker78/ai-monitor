@@ -95,10 +95,14 @@ export default async function DashboardPage({
       {/* Два продуктовых KPI (крупнее). Цели и «анализов в этом месяце» УБРАНЫ:
           дублировали тарифный блок (там есть контекст лимита/остатка). */}
       <div className="grid gap-4 sm:grid-cols-2">
+        {/* Не «всего за всё время»: считается как count строк Session, а крон
+            cleanup-old-sessions удаляет записи старше 30 дней — число УБЫВАЕТ.
+            Подпись «Всего по сайту» это опровергала: 13.08 после первого
+            прогона крона стало 134 там, где накануне было 161. */}
         <KpiCard
-          title="Сессий записано"
+          title="Записей хранится"
           value={data.kpi.sessionsRecorded.toLocaleString("ru-RU")}
-          description="Всего по сайту"
+          description="Сейчас в хранилище"
           icon={PlaySquare}
         />
         <Link

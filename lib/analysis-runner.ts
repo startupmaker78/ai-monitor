@@ -44,6 +44,13 @@ export type RunAnalysisResult =
     }
 
 const MAX_TOKENS = 8000
+
+// Сколько сессий отвалилось на извлечении — для лога таймингов: показывает,
+// добрали ли мы лимит и на чём именно теряем.
+function skippedTotal(c: CollectSessionsResult): number {
+  const s = c.skipped
+  return s.corrupted + s.noFullSnapshot + s.noPackets + s.noInteractions
+}
 // Общий cap на сбор сессий из S3 (6.3d). Ниже Gateway-лимита 300с →
 // падаем чисто до 504 и markFailed возвращает цель в ACTIVE.
 const COLLECT_TIMEOUT_MS = 60_000
@@ -188,6 +195,19 @@ export async function runAnalysis(
   // 60с < 300с Gateway → падаем чисто ДО 504, markFailed возвращает цель
   // в ACTIVE. Дополняет per-request S3-таймауты (lib/storage.ts): даже
   // если те не сработают — общий cap не даст зависнуть.
+  // Тайминги фаз (2026-08-13). Постоянное логирование, не временный костыль:
+  // упирается анализ во ВРЕМЯ, и без разбивки по фазам решение «можно ли
+  // поднять кап» принимается вслепую. Локальный замер тут не годится — он
+  // сетевой (ноутбук → S3), а контейнер стоит в одном регионе с хранилищем.
+  const phaseMs: Record<string, number> = {}
+  const phaseStart = Date.now()
+  let phaseMark = phaseStart
+  const mark = (name: string) => {
+    const now = Date.now()
+    phaseMs[name] = now - phaseMark
+    phaseMark = now
+  }
+
   let collected: CollectSessionsResult
   try {
     collected = await withTimeout(
@@ -197,6 +217,7 @@ export async function runAnalysis(
       COLLECT_TIMEOUT_MS,
       "session_collection",
     )
+    mark("collect_s3_parse")
   } catch (err) {
     console.error("[analysis-runner] session collection failed/timed out", {
       analysisId: analysis.id,
@@ -318,6 +339,8 @@ export async function runAnalysis(
   // Агрегаты считаем ВНЕ try выше: они зависят только от sessionSummaries и
   // счётчика пропущенных, никаких внешних вызовов. Если обогащение целью/
   // конверсией упало, блок агрегатов всё равно должен уехать в промпт.
+  mark("enrich_metrics_goal")
+
   const aggregates = buildAggregates(
     sessionSummaries,
     collected.skipped.noInteractions,
@@ -337,6 +360,7 @@ export async function runAnalysis(
   // 10. Промпт.
   const { system, messages } = buildAnalysisPrompt(input)
   await safeUpdateAnalysisPrompt(analysis.id, system, messages)
+  mark("build_prompt")
 
   // 11. Вызов Claude.
   const claudeResult = await callClaude({
@@ -344,6 +368,7 @@ export async function runAnalysis(
     messages,
     maxTokens: MAX_TOKENS,
   })
+  mark("model_call")
 
   // 12. Ошибки Claude.
   if (!claudeResult.ok) {
@@ -562,6 +587,24 @@ export async function runAnalysis(
       analysisId: analysis.id,
     }
   }
+  mark("persist_result")
+
+  // Разбивка по фазам + размеры входа. Ключи стабильные — по ним можно
+  // сравнивать прогоны между собой и решать, куда упирается время при
+  // следующем подъёме MAX_SESSIONS_PER_ANALYSIS.
+  console.log("[analysis-runner] timings", {
+    analysisId: analysis.id,
+    targetId,
+    limit: MAX_SESSIONS_PER_ANALYSIS,
+    sessionsQueried: collected.summaries.length + skippedTotal(collected),
+    sessionsInPrompt: input.sessionsCount,
+    skipped: collected.skipped,
+    promptChars: system.length + messages[0].content.length,
+    inputTokens: claudeResult.usage.inputTokens,
+    outputTokens: claudeResult.usage.outputTokens,
+    recommendations: parsed.recommendations.length,
+    ms: { ...phaseMs, total: Date.now() - phaseStart },
+  })
 
   return {
     ok: true,
